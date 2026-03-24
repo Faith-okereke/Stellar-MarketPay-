@@ -3,7 +3,7 @@
  * Shared formatting utilities for Stellar MarketPay.
  */
 
-import { formatDistanceToNow, format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import type { JobStatus } from "./types";
 
 export function formatXLM(amount: string | number, decimals = 4): string {
@@ -20,6 +20,14 @@ export function timeAgo(dateString: string): string {
 export function formatDate(dateString: string): string {
   try { return format(new Date(dateString), "MMM d, yyyy"); }
   catch { return dateString; }
+}
+
+export function formatDeadline(dateString: string): string {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "";
+
+  try { return format(date, "MMM d, yyyy"); }
+  catch { return ""; }
 }
 
 export function shortenAddress(address: string, chars = 6): string {
