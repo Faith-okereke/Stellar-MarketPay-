@@ -78,13 +78,70 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
           )}
         </div>
 
-        {/* Description */}
+            {/* Description */}
         <div>
           <label className="label">Description</label>
-          <textarea value={form.description} onChange={(e) => set("description", e.target.value)}
-            rows={5} placeholder="Describe the work in detail — requirements, deliverables, acceptance criteria..."
-            className="textarea-field" />
-          <p className="mt-1 text-xs text-amber-800/50">{form.description.length} chars (min 30)</p>
+        
+          <textarea
+            value={form.description}
+            rows={5}
+            maxLength={2000}
+            placeholder="Describe the work in detail — requirements, deliverables, acceptance criteria..."
+            className={clsx(
+              "textarea-field",
+              form.description.length > 0 &&
+                form.description.trim().length < 30 &&
+                "border-red-500/40"
+            )}
+            aria-invalid={form.description.trim().length > 0 && form.description.trim().length < 30}
+            aria-describedby="description-counter description-error"
+            onChange={(e) => {
+              let value = e.target.value;
+        
+              // Prevent overflow beyond 2000 characters (extra safety beyond maxLength)
+              if (value.length > 2000) {
+                value = value.slice(0, 2000);
+              }
+        
+              set("description", value);
+            }}
+            onPaste={(e) => {
+              const paste = e.clipboardData.getData("text");
+              const newLength = form.description.length + paste.length;
+        
+              // If pasted content would exceed limit, truncate it
+              if (newLength > 2000) {
+                e.preventDefault();
+                const allowed = paste.slice(0, 2000 - form.description.length);
+                set("description", form.description + allowed);
+              }
+            }}
+          />
+        
+          {/* Character Counter */}
+          <p
+            id="description-counter"
+            className={clsx(
+              "mt-1 text-xs font-medium",
+              form.description.trim().length < 30 && "text-red-400",
+              form.description.trim().length >= 30 &&
+                form.description.trim().length <= 100 &&
+                "text-amber-400",
+              form.description.trim().length > 100 && "text-green-400"
+            )}
+          >
+            {form.description.length} / 2000
+          </p>
+        
+          {/* Inline Error */}
+          {form.description.length > 0 && form.description.trim().length < 30 && (
+            <p
+              id="description-error"
+              className="mt-1 text-xs text-red-400"
+            >
+              Description must be at least 30 characters
+            </p>
+          )}
         </div>
 
         {/* Category + Budget row */}
@@ -138,8 +195,24 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
           <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>
         )}
 
-        <button onClick={handleSubmit} disabled={!isValid || loading} className="btn-primary w-full flex items-center justify-center gap-2">
-          {loading ? <><Spinner /> Posting Job...</> : "Post Job & Lock Budget in Escrow"}
+        <button
+          onClick={handleSubmit}
+          disabled={
+            loading ||
+            !isValid ||
+            form.description.trim().length < 30 ||
+            form.description.trim().length > 2000 ||
+            form.description.replace(/\s/g, "").length < 30
+          }
+          className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? (
+            <>
+              <Spinner /> Posting Job...
+            </>
+          ) : (
+            "Post Job & Lock Budget in Escrow"
+          )}
         </button>
 
         <p className="text-center text-xs text-amber-800/60">
