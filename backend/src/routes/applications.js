@@ -8,6 +8,7 @@ const {
   submitApplication, getApplicationsForJob,
   getApplicationsForFreelancer, acceptApplication,
 } = require("../services/applicationService");
+const { verifyJWT } = require("../middleware/auth");
 
 // GET /api/applications/job/:jobId
 router.get("/job/:jobId", (req, res, next) => {
@@ -22,7 +23,7 @@ router.get("/freelancer/:publicKey", (req, res, next) => {
 });
 
 // POST /api/applications — submit a proposal
-router.post("/", (req, res, next) => {
+router.post("/", verifyJWT, (req, res, next) => {
   try {
     const app = submitApplication(req.body);
     res.status(201).json({ success: true, data: app });
@@ -30,7 +31,7 @@ router.post("/", (req, res, next) => {
 });
 
 // POST /api/applications/:id/accept — client accepts a proposal
-router.post("/:id/accept", (req, res, next) => {
+router.post("/:id/accept", verifyJWT, (req, res, next) => {
   try {
     const app = acceptApplication(req.params.id, req.body.clientAddress);
     res.json({ success: true, data: app });

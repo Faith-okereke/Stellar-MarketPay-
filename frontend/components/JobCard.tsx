@@ -2,9 +2,9 @@
  * components/JobCard.tsx
  * Displays a single job listing in the browse grid.
  */
-import { formatDeadline, formatXLM, statusClass, statusLabel, timeAgo } from "@/utils/format";
+import Link from "next/link";
+import { formatDeadline, formatXLM, statusClass, statusLabel, timeAgo, formatUSDEquivalent } from "@/utils/format";
 import type { Job } from "@/utils/types";
-import { formatXLM, timeAgo, statusLabel, statusClass, shortenAddress, formatUSDEquivalent } from "@/utils/format";
 import { usePriceContext } from "@/contexts/PriceContext";
 
 interface JobCardProps { job: Job; }
@@ -12,6 +12,11 @@ interface JobCardProps { job: Job; }
 export default function JobCard({ job }: JobCardProps) {
   const { xlmPriceUsd } = usePriceContext();
   const usdEquivalent = formatUSDEquivalent(job.budget, xlmPriceUsd);
+
+  const hasValidDeadline = !!job.deadline;
+  const formattedDeadline = job.deadline ? formatDeadline(job.deadline) : "";
+  const isClosed = job.status === "cancelled" || job.status === "completed";
+  const isClosingSoon = job.deadline ? new Date(job.deadline).getTime() - Date.now() < 86400000 : false;
   return (
     <Link href={`/jobs/${job.id}`}>
       <div className="card-hover group animate-fade-in">

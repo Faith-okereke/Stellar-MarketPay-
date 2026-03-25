@@ -12,6 +12,29 @@ const api = axios.create({
   timeout: 10000,
 });
 
+// ─── Auth (SEP-0010) ──────────────────────────────────────────────────────────
+let jwtToken: string | null = null;
+export function setJwtToken(token: string | null) { jwtToken = token; }
+export function getJwtToken() { return jwtToken; }
+
+export async function fetchAuthChallenge(publicKey: string) {
+  const { data } = await api.get<{ transaction: string }>(`/api/auth?account=${publicKey}`);
+  return data.transaction;
+}
+
+export async function verifyAuthChallenge(transaction: string) {
+  const { data } = await api.post<{ success: boolean; token: string }>("/api/auth", { transaction });
+  return data.token;
+}
+
+api.interceptors.request.use((config: any) => {
+  if (jwtToken) {
+    config.headers.Authorization = `Bearer ${jwtToken}`;
+  }
+  return config;
+});
+
+
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
 export async function fetchJobs(params?: { category?: string; status?: string; limit?: number; search?: string }) {

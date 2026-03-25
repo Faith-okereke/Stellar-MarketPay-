@@ -2,7 +2,8 @@ import type { AppProps } from "next/app";
 import { useState, useEffect } from "react";
 import Head from "next/head";
 import Navbar from "@/components/Navbar";
-import { connectWallet, getConnectedPublicKey } from "@/lib/wallet";
+import { connectWallet, getConnectedPublicKey, signTransactionWithWallet } from "@/lib/wallet";
+import { fetchAuthChallenge, verifyAuthChallenge, setJwtToken } from "@/lib/api";
 import "@/styles/globals.css";
 import { ToastProvider } from "@/components/Toast";
 import { PriceProvider } from "@/contexts/PriceContext";
@@ -10,13 +11,44 @@ import { PriceProvider } from "@/contexts/PriceContext";
 export default function App({ Component, pageProps }: AppProps) {
   const [publicKey, setPublicKey] = useState<string | null>(null);
 
+  const handleAuthAndConnect = async (pk: string) => {
+    try {
+      const challengeTx = await fetchAuthChallenge(pk);
+      const { signedXDR, error } = await signTransactionWithWallet(challengeTx);
+      if (error || !signedXDR) {
+        console.error("Authentication failed:", error);
+        return false;
+      }
+      const token = await verifyAuthChallenge(signedXDR);
+      setJwtToken(token);
+      return true;
+    } catch (e) {
+      console.error("Auth error:", e);
+      return false;
+    }
+  };
+
   useEffect(() => {
-    getConnectedPublicKey().then((pk) => { if (pk) setPublicKey(pk); });
+    getConnectedPublicKey().then(async (pk) => { 
+      if (pk) {
+        const authenticated = await handleAuthAndConnect(pk);
+        if (authenticated) setPublicKey(pk);
+      } 
+    });
   }, []);
 
   const handleConnect = async () => {
-    const { publicKey: pk } = await connectWallet();
-    if (pk) setPublicKey(pk);
+    const { publicKey: pk, error } = await connectWallet();
+    if (pk) {
+      const authenticated = await handleAuthAndConnect(pk);
+      if (authenticated) {
+        setPublicKey(pk);
+      } else {
+        alert("Wallet connected, but authentication failed.");
+      }
+    } else if (error) {
+      alert(error);
+    }
   };
 
   return (

@@ -5,6 +5,7 @@
 const express = require("express");
 const router  = express.Router();
 const { createJob, getJob, listJobs, listJobsByClient } = require("../services/jobService");
+const { verifyJWT } = require("../middleware/auth");
 
 // GET /api/jobs — list jobs (with optional ?category=&status=&limit=&search=)
 router.get("/", (req, res, next) => {
@@ -27,7 +28,7 @@ router.get("/:id", (req, res, next) => {
 });
 
 // POST /api/jobs — create a new job
-router.post("/", (req, res, next) => {
+router.post("/", verifyJWT, (req, res, next) => {
   try {
     const job = createJob(req.body);
     res.status(201).json({ success: true, data: job });
