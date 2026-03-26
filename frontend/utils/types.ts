@@ -45,6 +45,16 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export interface Rating {
+  id: string;
+  jobId: string;
+  raterAddress: string;
+  ratedAddress: string;
+  stars: number;          // 1–5
+  review?: string;
+  createdAt: string;
+}
+
 export interface EscrowState {
   contractId: string;
   jobId: string;
