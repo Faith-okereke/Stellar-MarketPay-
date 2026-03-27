@@ -13,11 +13,19 @@ const generalJobRateLimiter = createRateLimiter(30, 1); // 100 requests per minu
 const { createJob, getJob, listJobs, listJobsByClient } = require("../services/jobService");
 const { verifyJWT } = require("../middleware/auth");
 
-// GET /api/jobs — list jobs (with optional ?category=&status=&limit=&search=)
-router.get("/", generalJobRateLimiter, (req, res, next) => {
+// GET /api/jobs — list jobs (with optional ?category=&status=&limit=&search=&minBudget=&maxBudget=)
+router.get("/", generalJobRateLimiter, async (req, res, next) => {
   try {
-    const { category, status, limit, search } = req.query;
-    res.json({ success: true, data: listJobs({ category, status, limit: parseInt(limit) || 50, search }) });
+    const { category, status, limit, search, minBudget, maxBudget } = req.query;
+    const data = await listJobs({
+      category,
+      status,
+      limit: parseInt(limit) || 50,
+      search,
+      minBudget: parseFloat(minBudget),
+      maxBudget: parseFloat(maxBudget)
+    });
+    res.json({ success: true, data });
   } catch (e) { next(e); }
 });
 
