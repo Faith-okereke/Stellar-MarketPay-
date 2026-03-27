@@ -106,7 +106,7 @@ async function getJob(id) {
   return rowToJob(rows[0]);
 }
 
-async function listJobs({ category, status = "open", limit = 50, search } = {}) {
+async function listJobs({ category, status = "open", limit = 50, search, minBudget, maxBudget } = {}) {
   const conditions = [];
   const params     = [];
 
@@ -128,6 +128,16 @@ async function listJobs({ category, status = "open", limit = 50, search } = {}) 
          SELECT 1 FROM unnest(skills) s WHERE LOWER(s) LIKE $${idx}
        ))`
     );
+  }
+
+  if (minBudget !== undefined && !isNaN(minBudget)) {
+    params.push(minBudget);
+    conditions.push(`budget >= $${params.length}`);
+  }
+
+  if (maxBudget !== undefined && !isNaN(maxBudget)) {
+    params.push(maxBudget);
+    conditions.push(`budget <= $${params.length}`);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
