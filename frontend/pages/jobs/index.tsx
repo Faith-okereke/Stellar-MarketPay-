@@ -126,6 +126,13 @@ export default function JobsPage() {
     }
   };
 
+  const setBudgetRange = (min: string, max: string) => {
+    router.push({
+      pathname: "/jobs",
+      query: { ...router.query, minBudget: min || undefined, maxBudget: max || undefined }
+    }, undefined, { shallow: true });
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
 
@@ -165,6 +172,54 @@ export default function JobsPage() {
                   {s === "" ? "All" : s === "open" ? "Open" : s === "in_progress" ? "In Progress" : "Completed"}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Budget Range */}
+          <div className="pt-2">
+            <p className="label mb-2">Budget (XLM)</p>
+            <div className="flex gap-2 items-center mb-3">
+              <input
+                type="number" placeholder="Min" value={minBudget}
+                onChange={(e) => setFilter("minBudget", e.target.value)}
+                className="w-full bg-market-900/40 border border-amber-900/30 rounded px-2 py-1 text-xs text-amber-100 placeholder:text-amber-900/50"
+              />
+              <span className="text-amber-900 text-[10px] font-bold">TO</span>
+              <input
+                type="number" placeholder="Max" value={maxBudget}
+                onChange={(e) => setFilter("maxBudget", e.target.value)}
+                className="w-full bg-market-900/40 border border-amber-900/30 rounded px-2 py-1 text-xs text-amber-100 placeholder:text-amber-900/50"
+              />
+            </div>
+
+            {/* Presets */}
+            <div className="grid grid-cols-2 gap-1.5 mb-3">
+              <button
+                onClick={() => setBudgetRange("", "100")}
+                className="text-[10px] py-1.5 rounded bg-market-500/5 border border-amber-900/20 text-amber-800 hover:border-amber-700/50 transition-colors"
+              >
+                &lt; 100
+              </button>
+              <button
+                onClick={() => setBudgetRange("100", "500")}
+                className="text-[10px] py-1.5 rounded bg-market-500/5 border border-amber-900/20 text-amber-800 hover:border-amber-700/50 transition-colors"
+              >
+                100-500
+              </button>
+              <button
+                onClick={() => setBudgetRange("500", "")}
+                className="text-[10px] py-1.5 rounded bg-market-500/5 border border-amber-900/20 text-amber-800 hover:border-amber-700/50 transition-colors"
+              >
+                500+
+              </button>
+              {(minBudget || maxBudget) && (
+                <button
+                  onClick={() => setBudgetRange("", "")}
+                  className="text-[10px] py-1.5 rounded bg-market-900/40 border border-market-500/30 text-market-400 hover:text-market-300 font-bold"
+                >
+                  CLEAR
+                </button>
+              )}
             </div>
           </div>
 
