@@ -84,33 +84,19 @@ export function formatDeadline(dateString: string): string {
   catch { return ""; }
 }
 
-export function availabilityStatusLabel(status?: Availability["status"] | null): string {
-  if (!status) return "Availability not set";
-  return {
-    available: "Available",
-    busy: "Busy",
-    unavailable: "Unavailable",
-  }[status];
-}
+export type DeadlineState = "none" | "closing_soon" | "closed";
 
-export function availabilitySummary(availability?: Availability | null): string | null {
-  if (!availability?.status) return null;
+export function getDeadlineState(dateString?: string | null, now = Date.now()): DeadlineState {
+  if (!dateString) return "none";
 
-  if (availability.status === "available") {
-    if (availability.availableFrom) return `Available from ${formatDate(availability.availableFrom)}`;
-    if (availability.availableUntil) return `Available until ${formatDate(availability.availableUntil)}`;
-    return "Available for new work";
-  }
+  const deadline = new Date(dateString);
+  const deadlineTime = deadline.getTime();
+  if (Number.isNaN(deadlineTime)) return "none";
 
-  if (availability.status === "busy") {
-    if (availability.availableFrom) return `Available from ${formatDate(availability.availableFrom)}`;
-    if (availability.availableUntil) return `Busy until ${formatDate(availability.availableUntil)}`;
-    return "Currently busy";
-  }
+  if (deadlineTime <= now) return "closed";
+  if (deadlineTime - now <= 72 * 60 * 60 * 1000) return "closing_soon";
 
-  if (availability.availableFrom) return `Unavailable until ${formatDate(availability.availableFrom)}`;
-  if (availability.availableUntil) return `Unavailable until ${formatDate(availability.availableUntil)}`;
-  return "Not available for new work";
+  return "none";
 }
 
 export function shortenAddress(address: string, chars = 6): string {
