@@ -11,14 +11,22 @@ const generalProfileRateLimiter = createRateLimiter(30, 1); // 100 requests per 
 
 const { getProfile, upsertProfile } = require("../services/profileService");
 
-router.get("/:publicKey", generalProfileRateLimiter ,(req, res, next) => {
-  try { res.json({ success: true, data: getProfile(req.params.publicKey) }); }
-  catch (e) { next(e); }
+router.get("/:publicKey", generalProfileRateLimiter, async (req, res, next) => {
+  try {
+    const profile = await getProfile(req.params.publicKey);
+    res.json({ success: true, data: profile });
+  } catch (e) {
+    next(e);
+  }
 });
 
-router.post("/", profileUpdateRateLimiter, (req, res, next) => {
-  try { res.json({ success: true, data: upsertProfile(req.body) }); }
-  catch (e) { next(e); }
+router.post("/", profileUpdateRateLimiter, async (req, res, next) => {
+  try {
+    const profile = await upsertProfile(req.body);
+    res.json({ success: true, data: profile });
+  } catch (e) {
+    next(e);
+  }
 });
 
 module.exports = router;

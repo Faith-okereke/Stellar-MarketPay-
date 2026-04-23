@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import ApplicationForm from "@/components/ApplicationForm";
+import FreelancerTierBadge from "@/components/FreelancerTierBadge";
 import WalletConnect from "@/components/WalletConnect";
 import RatingForm from "@/components/RatingForm";
 import { fetchJob, fetchApplications, acceptApplication, releaseEscrow } from "@/lib/api";
@@ -231,10 +232,13 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
             {applications.map((app) => (
               <div key={app.id} className="card">
                 <div className="flex items-start justify-between gap-4 mb-3">
-                  <a href={accountUrl(app.freelancerAddress)} target="_blank" rel="noopener noreferrer"
-                    className="address-tag hover:border-market-500/40 transition-colors">
-                    {shortenAddress(app.freelancerAddress)} ↗
-                  </a>
+                  <div className="space-y-2">
+                    <a href={accountUrl(app.freelancerAddress)} target="_blank" rel="noopener noreferrer"
+                      className="address-tag hover:border-market-500/40 transition-colors">
+                      {shortenAddress(app.freelancerAddress)} ↗
+                    </a>
+                    <FreelancerTierBadge tier={app.freelancerTier} />
+                  </div>
                   <div className="flex items-center gap-3">
                     <span className="font-mono text-market-400 font-semibold text-sm">{formatXLM(app.bidAmount)}</span>
                     <span className={clsx("text-xs px-2.5 py-1 rounded-full border",

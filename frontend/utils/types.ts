@@ -5,6 +5,7 @@
 
 export type JobStatus = "open" | "in_progress" | "completed" | "cancelled";
 export type UserRole  = "client" | "freelancer" | "both";
+export type FreelancerTier = "Newcomer" | "Rising Star" | "Expert" | "Top Talent";
 
 export interface Job {
   id: string;
@@ -27,6 +28,7 @@ export interface Application {
   id: string;
   jobId: string;
   freelancerAddress: string;
+  freelancerTier?: FreelancerTier;
   proposal: string;
   bidAmount: string;     // XLM amount as string
   status: "pending" | "accepted" | "rejected";
@@ -42,6 +44,7 @@ export interface UserProfile {
   completedJobs: number;
   totalEarnedXLM: string;
   rating?: number;
+  tier?: FreelancerTier;
   /** Number of ratings received (when returned by profile API). */
   ratingCount?: number;
   createdAt: string;

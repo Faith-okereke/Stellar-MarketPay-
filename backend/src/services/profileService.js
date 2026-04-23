@@ -27,9 +27,20 @@ function rowToProfile(row) {
     completedJobs:   row.completed_jobs,
     totalEarnedXLM:  row.total_earned_xlm,
     rating:          row.rating !== null ? parseFloat(row.rating) : null,
+    tier:            row.tier || "Newcomer",
     createdAt:       row.created_at,
     updatedAt:       row.updated_at,
   };
+}
+
+function calculateFreelancerTier(completedJobs, averageRating) {
+  const jobs = Number.isFinite(Number(completedJobs)) ? Number(completedJobs) : 0;
+  const rating = typeof averageRating === "number" ? averageRating : null;
+
+  if (jobs >= 25 && rating !== null && rating >= 4.8) return "Top Talent";
+  if (jobs >= 10 && rating !== null && rating >= 4.5) return "Expert";
+  if (jobs >= 3 && rating !== null && rating >= 4.0) return "Rising Star";
+  return "Newcomer";
 }
 
 // ─── service functions ───────────────────────────────────────────────────────
@@ -57,6 +68,7 @@ async function getProfile(publicKey) {
   const profile = rowToProfile(rows[0]);
   profile.rating      = rows[0].avg_rating !== null ? parseFloat(rows[0].avg_rating) : null;
   profile.ratingCount = rows[0].rating_count;
+  profile.tier        = calculateFreelancerTier(profile.completedJobs, profile.rating);
   return profile;
 }
 
@@ -90,4 +102,4 @@ async function upsertProfile({ publicKey, displayName, bio, skills, role }) {
   return rowToProfile(rows[0]);
 }
 
-module.exports = { getProfile, upsertProfile };
+module.exports = { getProfile, upsertProfile, calculateFreelancerTier };

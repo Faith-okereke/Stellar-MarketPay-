@@ -6,6 +6,7 @@ import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
+import FreelancerTierBadge from "@/components/FreelancerTierBadge";
 import { fetchPublicProfile } from "@/lib/api";
 import { formatXLM, shortenAddress } from "@/utils/format";
 import { accountUrl, isValidStellarAddress } from "@/lib/stellar";
@@ -142,6 +143,9 @@ export default function PublicFreelancerProfilePage() {
                 <h1 className="font-display text-2xl sm:text-3xl font-bold text-amber-100 break-words">
                   {state.profile.displayName?.trim() || shortenAddress(state.profile.publicKey)}
                 </h1>
+                <div className="mt-3">
+                  <FreelancerTierBadge tier={state.profile.tier} className="text-sm" />
+                </div>
                 <p className="text-xs sm:text-sm text-amber-800 mt-2 font-mono break-all">
                   {state.profile.publicKey}
                 </p>
@@ -180,6 +184,16 @@ export default function PublicFreelancerProfilePage() {
                 <p className="label mb-1">Total earned</p>
                 <p className="font-display text-2xl sm:text-3xl font-bold text-market-400">
                   {formatXLM(state.profile.totalEarnedXLM ?? "0")}
+                </p>
+              </div>
+              <div className="rounded-xl bg-ink-900/50 border border-market-500/10 p-4">
+                <p className="label mb-1">Freelancer tier</p>
+                <FreelancerTierBadge tier={state.profile.tier} className="mt-2" />
+              </div>
+              <div className="rounded-xl bg-ink-900/50 border border-market-500/10 p-4">
+                <p className="label mb-1">Average rating</p>
+                <p className="font-display text-2xl sm:text-3xl font-bold text-market-400">
+                  {state.profile.rating?.toFixed(2) ?? "New"}
                 </p>
               </div>
             </div>
