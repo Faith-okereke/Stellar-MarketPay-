@@ -45,9 +45,16 @@ CREATE TABLE IF NOT EXISTS jobs (
   deadline            TIMESTAMPTZ,
   timezone            TEXT,
   screening_questions TEXT[]      NOT NULL DEFAULT '{}',
+  share_count         INTEGER     NOT NULL DEFAULT 0,
+  boosted             BOOLEAN     NOT NULL DEFAULT false,
+  boosted_until       TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS share_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS boosted BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS jobs_status_idx          ON jobs(status);
 CREATE INDEX IF NOT EXISTS jobs_category_idx        ON jobs(category);
