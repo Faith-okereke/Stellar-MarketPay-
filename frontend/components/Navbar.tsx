@@ -1,6 +1,7 @@
 /**
  * components/Navbar.tsx
  */
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { shortenAddress } from "@/utils/format";
@@ -23,6 +24,25 @@ const STELLAR_NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet";
 
 export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarProps) {
   const router = useRouter();
+
+  const [hasNotification, setHasNotification] = useState(false);
+
+  useEffect(() => {
+    const handleActivity = () => {
+      if (router.pathname !== "/dashboard") {
+        setHasNotification(true);
+      }
+    };
+
+    window.addEventListener("stellar-activity", handleActivity);
+    return () => window.removeEventListener("stellar-activity", handleActivity);
+  }, [router.pathname]);
+
+  useEffect(() => {
+    if (router.pathname === "/dashboard") {
+      setHasNotification(false);
+    }
+  }, [router.pathname]);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[rgba(251,191,36,0.10)] bg-ink-900/85 backdrop-blur-xl">
@@ -53,12 +73,17 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
           {links.map((l) => (
             <Link key={l.href} href={l.href}
               className={clsx(
-                "px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150",
+                "px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 relative",
                 router.pathname === l.href
                   ? "bg-market-500/12 text-market-300"
                   : "text-amber-700 hover:text-amber-300 hover:bg-market-500/8"
               )}
-            >{l.label}</Link>
+            >
+              {l.label}
+              {l.href === "/dashboard" && hasNotification && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-emerald-400 rounded-full border border-ink-900" />
+              )}
+            </Link>
           ))}
         </div>
 

@@ -4,12 +4,13 @@
 */
 import JobCard, { JobCardSkeleton } from "@/components/JobCard";
 import { fetchJobs } from "@/lib/api";
-import { JOB_CATEGORIES } from "@/utils/format";
+import { JOB_CATEGORIES, CATEGORY_ICONS } from "@/utils/format";
 import type { Job } from "@/utils/types";
 import clsx from "clsx";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
+import { getTimezoneOffset, toZonedTime } from "date-fns-tz";
 
 export default function JobsPage() {
   const router = useRouter();
@@ -20,12 +21,51 @@ export default function JobsPage() {
   const [search, setSearch] = useState("");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [userTimezone, setUserTimezone] = useState<string>("");
+  const [manualTimezone, setManualTimezone] = useState<string>("");
+  const [useGeolocation, setUseGeolocation] = useState<boolean>(false);
+  const [geoLoading, setGeoLoading] = useState<boolean>(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
   const category = (router.query.category as string) || "";
   const status = (router.query.status as string) || "open";
   const pageFromQuery = Math.max(1, Number(router.query.page) || 1);
   const minBudget = (router.query.minBudget as string) || "";
   const maxBudget = (router.query.maxBudget as string) || "";
+
+  // Detect user's timezone from browser
+  useEffect(() => {
+    const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    setUserTimezone(detectedTz);
+  }, []);
+
+  // Handle geolocation-based timezone detection
+  const handleGeolocation = () => {
+    setGeoLoading(true);
+    setGeoError(null);
+
+    // Use browser's detected timezone (no API key needed)
+    const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    setUserTimezone(detectedTz);
+    setUseGeolocation(true);
+    setGeoLoading(false);
+  };
+
+  // Check if job timezone is within ±3 hours of user timezone
+  const isTimezoneCompatible = (jobTimezone: string | undefined): boolean => {
+    if (!jobTimezone) return true; // Jobs without timezone appear for all users
+    if (!userTimezone) return true; // If no user timezone, show all jobs
+
+    try {
+      const now = new Date();
+      const userOffset = getTimezoneOffset(userTimezone, now);
+      const jobOffset = getTimezoneOffset(jobTimezone, now);
+      const diffHours = Math.abs(userOffset - jobOffset) / (1000 * 60 * 60);
+      return diffHours <= 3;
+    } catch (err) {
+      return true; // If timezone parsing fails, show the job
+    }
+  };
 
   useEffect(() => {
     if (!router.isReady) return;
@@ -42,12 +82,16 @@ export default function JobsPage() {
         let pagesLoaded = 0;
         let allJobs: Job[] = [];
 
+        // Determine active timezone for backend filtering
+        const activeTimezone = manualTimezone || (useGeolocation ? userTimezone : "");
+
         for (let page = 1; page <= pageFromQuery; page += 1) {
           const result = await fetchJobs({
             category: category || undefined,
             status: status || undefined,
             limit: 20,
             cursor,
+            timezone: activeTimezone || undefined,
           });
 
           const seenIds = new Set(allJobs.map((job) => job.id));
@@ -75,7 +119,7 @@ export default function JobsPage() {
     loadJobs();
 
     return () => { isCancelled = true; };
-  }, [category, status, pageFromQuery, router.isReady]);
+  }, [category, status, pageFromQuery, router.isReady, manualTimezone, useGeolocation, userTimezone]);
 
   const searchFiltered = search.trim()
     ? jobs.filter((j) =>
@@ -87,7 +131,7 @@ export default function JobsPage() {
 
   const minN = minBudget.trim() ? parseFloat(minBudget) : NaN;
   const maxN = maxBudget.trim() ? parseFloat(maxBudget) : NaN;
-  const filtered =
+  const budgetFiltered =
     !Number.isNaN(minN) || !Number.isNaN(maxN)
       ? searchFiltered.filter((j) => {
           const b = parseFloat(j.budget);
@@ -97,6 +141,12 @@ export default function JobsPage() {
           return true;
         })
       : searchFiltered;
+
+  // Apply timezone filtering
+  const activeTimezone = manualTimezone || (useGeolocation ? userTimezone : "");
+  const filtered = activeTimezone
+    ? budgetFiltered.filter((j) => isTimezoneCompatible(j.timezone))
+    : budgetFiltered;
 
   const setFilter = (key: string, val: string) => {
     router.push(
@@ -113,11 +163,15 @@ export default function JobsPage() {
     setError(null);
 
     try {
+      // Determine active timezone for backend filtering
+      const activeTimezone = manualTimezone || (useGeolocation ? userTimezone : "");
+
       const result = await fetchJobs({
         category: category || undefined,
         status: status || undefined,
         limit: 20,
         cursor: nextCursor,
+        timezone: activeTimezone || undefined,
       });
 
       setJobs((prev) => {
@@ -243,17 +297,102 @@ export default function JobsPage() {
             <p className="label">Category</p>
             <div className="space-y-1">
               <button onClick={() => setFilter("category", "")}
-                className={clsx("w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body",
-                  !category ? "bg-market-500/15 text-market-300 font-medium" : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8")}>
-                All Categories
+                className={clsx(
+                  "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200",
+                  !category
+                    ? "bg-market-500/20 text-market-300 font-medium ring-1 ring-market-500/30"
+                    : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8 hover:translate-x-0.5"
+                )}>
+                🗂️ All Categories
+                <span className="ml-1 text-xs text-amber-800">({jobs.length})</span>
               </button>
-              {JOB_CATEGORIES.map((cat) => (
-                <button key={cat} onClick={() => setFilter("category", cat)}
-                  className={clsx("w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body",
-                    category === cat ? "bg-market-500/15 text-market-300 font-medium" : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8")}>
-                  {cat}
+              {JOB_CATEGORIES.map((cat) => {
+                const count = jobs.filter((j) => j.category === cat).length;
+                return (
+                  <button key={cat} onClick={() => setFilter("category", cat)}
+                    className={clsx(
+                      "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200",
+                      category === cat
+                        ? "bg-market-500/20 text-market-300 font-medium ring-1 ring-market-500/30"
+                        : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8 hover:translate-x-0.5"
+                    )}>
+                    {CATEGORY_ICONS[cat] ?? ""} {cat}
+                    <span className="ml-1 text-xs text-amber-800">({count})</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Timezone Filter */}
+          <div>
+            <p className="label">Timezone</p>
+            <div className="space-y-2">
+              {/* Geolocation button */}
+              <button
+                onClick={handleGeolocation}
+                disabled={geoLoading}
+                className={clsx(
+                  "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body flex items-center gap-2",
+                  useGeolocation ? "bg-market-500/15 text-market-300 font-medium" : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8",
+                  geoLoading && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                {geoLoading ? (
+                  <SpinnerIcon className="w-3 h-3 animate-spin" />
+                ) : (
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                )}
+                {geoLoading ? "Detecting..." : useGeolocation ? `My Location (${userTimezone})` : "Use My Location"}
+              </button>
+
+              {geoError && (
+                <p className="text-xs text-red-400 px-1">{geoError}</p>
+              )}
+
+              {/* Manual timezone selection */}
+              <select
+                value={manualTimezone}
+                onChange={(e) => {
+                  setManualTimezone(e.target.value);
+                  setUseGeolocation(false);
+                }}
+                className="w-full bg-market-900/40 border border-amber-900/30 rounded px-2 py-1.5 text-xs text-amber-100 appearance-none cursor-pointer"
+              >
+                <option value="">All Timezones</option>
+                <option value="UTC">UTC (Universal)</option>
+                <option value="America/New_York">America/New York</option>
+                <option value="America/Los_Angeles">America/Los Angeles</option>
+                <option value="America/Chicago">America/Chicago</option>
+                <option value="Europe/London">Europe/London</option>
+                <option value="Europe/Paris">Europe/Paris</option>
+                <option value="Europe/Berlin">Europe/Berlin</option>
+                <option value="Asia/Tokyo">Asia/Tokyo</option>
+                <option value="Asia/Shanghai">Asia/Shanghai</option>
+                <option value="Asia/Singapore">Asia/Singapore</option>
+                <option value="Asia/Kolkata">Asia/Kolkata</option>
+                <option value="Australia/Sydney">Australia/Sydney</option>
+                <option value="Pacific/Auckland">Pacific/Auckland</option>
+              </select>
+
+              {(activeTimezone) && (
+                <button
+                  onClick={() => {
+                    setManualTimezone("");
+                    setUseGeolocation(false);
+                  }}
+                  className="text-[10px] py-1.5 rounded bg-market-900/40 border border-market-500/30 text-market-400 hover:text-market-300 font-bold w-full"
+                >
+                  CLEAR TIMEZONE
                 </button>
-              ))}
+              )}
+
+              <p className="text-[10px] text-amber-800/60 px-1">
+                Shows jobs within ±3 hours of selected timezone
+              </p>
             </div>
           </div>
         </aside>

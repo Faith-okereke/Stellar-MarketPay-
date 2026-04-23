@@ -18,7 +18,7 @@
  */
 
 import axios from "axios";
-import type { Job, Application, UserProfile, Rating } from "@/utils/types";
+import type { Availability, Job, Application, UserProfile, Rating } from "@/utils/types";
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000",
@@ -88,12 +88,23 @@ api.interceptors.request.use((config: any) => {
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
-export async function fetchJobs(params?: { category?: string; status?: string; limit?: number; search?: string; cursor?: string }) {
+export async function fetchJobs(params?: { category?: string; status?: string; limit?: number; search?: string; cursor?: string; timezone?: string }) {
   const { data } = await api.get<{ success: boolean; data: Job[]; nextCursor: string | null }>("/api/jobs", { params });
   return {
     jobs: data.data,
     nextCursor: data.nextCursor ?? null,
   };
+}
+
+/**
+ * Fetches the most recently completed jobs for social proof on the home page.
+ *
+ * @param limit Number of completed jobs to fetch (default 3).
+ * @returns Array of completed jobs, newest first.
+ */
+export async function fetchRecentlyCompletedJobs(limit = 3): Promise<Job[]> {
+  const { jobs } = await fetchJobs({ status: "completed", limit });
+  return jobs;
 }
 
 /**
@@ -148,7 +159,9 @@ export async function fetchJob(id: string) {
 export async function createJob(payload: {
   title: string; description: string; budget: string;
   category: string; skills: string[]; deadline?: string;
+  timezone?: string;
   clientAddress: string;
+  screeningQuestions?: string[];
 }) {
   const { data } = await api.post<{ success: boolean; data: Job }>("/api/jobs", payload);
   return data.data;
@@ -211,6 +224,7 @@ export async function fetchApplications(jobId: string) {
  */
 export async function submitApplication(payload: {
   jobId: string; freelancerAddress: string; proposal: string; bidAmount: string;
+  screeningAnswers?: Record<string, string>;
 }) {
   const { data } = await api.post<{ success: boolean; data: Application }>("/api/applications", payload);
   return data.data;
@@ -292,6 +306,24 @@ export async function fetchPublicProfile(publicKey: string): Promise<UserProfile
  */
 export async function upsertProfile(payload: Partial<UserProfile> & { publicKey: string }) {
   const { data } = await api.post<{ success: boolean; data: UserProfile }>("/api/profiles", payload);
+  return data.data;
+}
+
+/**
+ * Updates a user's availability window and status.
+ *
+ * @param publicKey User Stellar public key.
+ * @param payload Availability payload accepted by the backend.
+ * @returns The saved profile.
+ */
+export async function updateProfileAvailability(
+  publicKey: string,
+  payload: Availability
+) {
+  const { data } = await api.post<{ success: boolean; data: UserProfile }>(
+    `/api/profiles/${encodeURIComponent(publicKey)}/availability`,
+    payload
+  );
   return data.data;
 }
 

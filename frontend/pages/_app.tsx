@@ -59,6 +59,8 @@ export default function App({ Component, pageProps }: AppProps) {
           <title>Stellar MarketPay — Decentralised Freelance Marketplace</title>
           <meta name="description" content="Post jobs, hire freelancers, and pay with XLM — secured by Soroban smart contracts." />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <link rel="alternate" type="application/rss+xml" title="Stellar MarketPay — Job Listings (RSS)" href="/api/jobs/feed.rss" />
+          <link rel="alternate" type="application/atom+xml" title="Stellar MarketPay — Job Listings (Atom)" href="/api/jobs/feed.atom" />
         </Head>
         <div className="min-h-screen bg-ink-900 bg-lines">
           <Navbar publicKey={publicKey} onConnect={handleConnect} onDisconnect={() => setPublicKey(null)} />

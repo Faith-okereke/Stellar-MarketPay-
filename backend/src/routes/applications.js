@@ -15,29 +15,37 @@ const {
 } = require("../services/applicationService");
 
 // GET /api/applications/job/:jobId
-router.get("/job/:jobId", generalApplicationRateLimiter ,(req, res, next) => {
-  try { res.json({ success: true, data: getApplicationsForJob(req.params.jobId) }); }
-  catch (e) { next(e); }
+router.get("/job/:jobId", generalApplicationRateLimiter, async (req, res, next) => {
+  try {
+    const applications = await getApplicationsForJob(req.params.jobId);
+    res.json({ success: true, data: applications });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // GET /api/applications/freelancer/:publicKey
-router.get("/freelancer/:publicKey", generalApplicationRateLimiter ,(req, res, next) => {
-  try { res.json({ success: true, data: getApplicationsForFreelancer(req.params.publicKey) }); }
-  catch (e) { next(e); }
+router.get("/freelancer/:publicKey", generalApplicationRateLimiter, async (req, res, next) => {
+  try {
+    const applications = await getApplicationsForFreelancer(req.params.publicKey);
+    res.json({ success: true, data: applications });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // POST /api/applications — submit a proposal
-router.post("/", applicationRateLimiter ,(req, res, next) => {
+router.post("/", applicationRateLimiter, async (req, res, next) => {
   try {
-    const app = submitApplication(req.body);
+    const app = await submitApplication(req.body);
     res.status(201).json({ success: true, data: app });
   } catch (e) { next(e); }
 });
 
 // POST /api/applications/:id/accept — client accepts a proposal
-router.post("/:id/accept", applicationRateLimiter ,(req, res, next) => {
+router.post("/:id/accept", applicationRateLimiter, async (req, res, next) => {
   try {
-    const app = acceptApplication(req.params.id, req.body.clientAddress);
+    const app = await acceptApplication(req.params.id, req.body.clientAddress);
     res.json({ success: true, data: app });
   } catch (e) { next(e); }
 });

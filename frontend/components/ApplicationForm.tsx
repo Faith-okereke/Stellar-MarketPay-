@@ -7,25 +7,48 @@ import { submitApplication } from "@/lib/api";
 import type { Job } from "@/utils/types";
 import { formatXLM } from "@/utils/format";
 import { useToast } from "./Toast";
+import clsx from "clsx";
 
 interface ApplicationFormProps {
   job: Job;
   publicKey: string;
+  prefillData?: {
+    bidAmount?: string;
+    message?: string;
+  };
   onSuccess: () => void;
 }
 
-export default function ApplicationForm({ job, publicKey, onSuccess }: ApplicationFormProps) {
-  const [proposal, setProposal] = useState("");
+export default function ApplicationForm({ job, publicKey, prefillData, onSuccess }: ApplicationFormProps) {
+  const [proposal, setProposal] = useState(prefillData?.message || "");
   const toast = useToast();
-  const [bidAmount, setBidAmount] = useState(job.budget);
+  const [bidAmount, setBidAmount] = useState(prefillData?.bidAmount || job.budget);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [screeningAnswers, setScreeningAnswers] = useState<Record<string, string>>({});
 
   const isValid = proposal.trim().length >= 50 && parseFloat(bidAmount) > 0;
 
+  // Initialize screening answers when job changes
+  useEffect(() => {
+    if (job.screeningQuestions && job.screeningQuestions.length > 0) {
+      const initialAnswers: Record<string, string> = {};
+      job.screeningQuestions.forEach(q => {
+        initialAnswers[q] = "";
+      });
+      setScreeningAnswers(initialAnswers);
+    }
+  }, [job.screeningQuestions]);
+
+  const allScreeningQuestionsAnswered = job.screeningQuestions && job.screeningQuestions.length > 0
+    ? job.screeningQuestions.every(q => screeningAnswers[q] && screeningAnswers[q].trim().length > 0)
+    : true;
+
+  const isFormValid = isValid && allScreeningQuestionsAnswered;
+
   const handleSubmit = () => {
-    if (!isValid) return;
+    if (!isFormValid) return;
     setShowConfirm(true);
   };
 
@@ -39,6 +62,7 @@ export default function ApplicationForm({ job, publicKey, onSuccess }: Applicati
         freelancerAddress: publicKey,
         proposal: proposal.trim(),
         bidAmount: parseFloat(bidAmount).toFixed(7),
+          screeningAnswers: job.screeningQuestions && job.screeningQuestions.length > 0 ? screeningAnswers : undefined,
       });
       toast.success("Proposal submitted successfully!");
       onSuccess();
@@ -82,11 +106,38 @@ export default function ApplicationForm({ job, publicKey, onSuccess }: Applicati
             </p>
           </div>
 
+          {/* Screening Questions */}
+          {job.screeningQuestions && job.screeningQuestions.length > 0 && (
+            <div>
+              <label className="label">Screening Questions <span className="text-red-400">*</span></label>
+              <p className="text-xs text-amber-800/50 mb-3">Please answer all questions to submit your application.</p>
+              <div className="space-y-4">
+                {job.screeningQuestions.map((question, index) => (
+                  <div key={index}>
+                    <label className="text-sm text-amber-200 mb-1.5 block">
+                      {index + 1}. {question}
+                    </label>
+                    <textarea
+                      value={screeningAnswers[question] || ""}
+                      onChange={(e) => setScreeningAnswers({ ...screeningAnswers, [question]: e.target.value })}
+                      rows={3}
+                      placeholder="Your answer..."
+                      className="textarea-field"
+                    />
+                  </div>
+                ))}
+              </div>
+              {!allScreeningQuestionsAnswered && (
+                <p className="mt-2 text-xs text-red-400">All screening questions must be answered</p>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>
           )}
 
-          <button onClick={handleSubmit} disabled={!isValid || loading} className="btn-primary w-full flex items-center justify-center gap-2">
+          <button onClick={handleSubmit} disabled={!isFormValid || loading} className="btn-primary w-full flex items-center justify-center gap-2">
             {loading ? <><Spinner />Submitting...</> : "Submit Proposal"}
           </button>
         </div>
