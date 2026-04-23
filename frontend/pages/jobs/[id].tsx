@@ -8,6 +8,7 @@ import Link from "next/link";
 import Head from "next/head";
 import clsx from "clsx";
 import ApplicationForm from "@/components/ApplicationForm";
+import FreelancerTierBadge from "@/components/FreelancerTierBadge";
 import WalletConnect from "@/components/WalletConnect";
 import RatingForm from "@/components/RatingForm";
 import ShareJobModal from "@/components/ShareJobModal";

@@ -14,12 +14,12 @@ const jobService = require("../services/jobService");
 const { createJob, getJob, listJobs, listJobsByClient, updateJobEscrowId, deleteJob, boostJob, incrementShareCount } = jobService.default || jobService;
 const { verifyJWT } = require("../middleware/auth");
 
-// GET /api/jobs — list jobs (with optional ?category=&status=&limit=&search=)
+// GET /api/jobs — list jobs (with optional ?category=&status=&limit=&search=&cursor=&timezone=)
 router.get("/", generalJobRateLimiter, async (req, res, next) => {
   try {
-    const { category, status, limit, search, cursor } = req.query;
+    const { category, status, limit, search, cursor, timezone } = req.query;
     const safeLimit = Math.max(1, Math.min(parseInt(limit, 10) || 20, 100));
-    const result = await listJobs({ category, status, limit: safeLimit, search, cursor });
+    const result = await listJobs({ category, status, limit: safeLimit, search, cursor, timezone });
     res.json({ success: true, data: result.jobs, nextCursor: result.nextCursor });
   } catch (e) { next(e); }
 });

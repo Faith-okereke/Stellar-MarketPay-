@@ -88,7 +88,7 @@ api.interceptors.request.use((config: any) => {
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
-export async function fetchJobs(params?: { category?: string; status?: string; limit?: number; search?: string; cursor?: string }) {
+export async function fetchJobs(params?: { category?: string; status?: string; limit?: number; search?: string; cursor?: string; timezone?: string }) {
   const { data } = await api.get<{ success: boolean; data: Job[]; nextCursor: string | null }>("/api/jobs", { params });
   return {
     jobs: data.data,
@@ -148,6 +148,7 @@ export async function fetchJob(id: string) {
 export async function createJob(payload: {
   title: string; description: string; budget: string;
   category: string; skills: string[]; deadline?: string;
+  timezone?: string;
   clientAddress: string;
 }) {
   const { data } = await api.post<{ success: boolean; data: Job }>("/api/jobs", payload);

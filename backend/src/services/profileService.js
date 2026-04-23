@@ -165,6 +165,7 @@ async function getProfile(publicKey) {
   const profile = rowToProfile(rows[0]);
   profile.rating = rows[0].avg_rating !== null ? parseFloat(rows[0].avg_rating) : null;
   profile.ratingCount = rows[0].rating_count;
+  profile.tier        = calculateFreelancerTier(profile.completedJobs, profile.rating);
   return profile;
 }
 

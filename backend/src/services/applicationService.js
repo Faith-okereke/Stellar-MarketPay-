@@ -4,8 +4,9 @@
  */
 "use strict";
 
-import { query, connect } from "../db/pool";
-import { getJob, assignFreelancer } from "./jobService";
+const pool = require("../db/pool");
+const { getJob, assignFreelancer } = require("./jobService");
+const { calculateFreelancerTier } = require("./profileService");
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -19,10 +20,16 @@ function validatePublicKey(key) {
 
 /** Convert snake_case DB row → camelCase API object */
 function rowToApp(row) {
+  const completedJobs = row.completed_jobs ?? 0;
+  const freelancerRating = row.avg_rating !== null && row.avg_rating !== undefined
+    ? parseFloat(row.avg_rating)
+    : null;
+
   return {
     id:                row.id,
     jobId:             row.job_id,
     freelancerAddress: row.freelancer_address,
+    freelancerTier:    calculateFreelancerTier(completedJobs, freelancerRating),
     proposal:          row.proposal,
     bidAmount:         row.bid_amount,
     currency:          row.currency || 'XLM',
@@ -71,7 +78,7 @@ async function submitApplication({ jobId, freelancerAddress, proposal, bidAmount
   }
 
   // Increment applicant count
-  await query(
+  await pool.query(
     "UPDATE jobs SET applicant_count = applicant_count + 1, updated_at = NOW() WHERE id = $1",
     [jobId]
   );
@@ -80,8 +87,16 @@ async function submitApplication({ jobId, freelancerAddress, proposal, bidAmount
 }
 
 async function getApplicationsForJob(jobId) {
-  const { rows } = await query(
-    "SELECT * FROM applications WHERE job_id = $1 ORDER BY created_at ASC",
+  const { rows } = await pool.query(
+    `SELECT a.*,
+            COALESCE(p.completed_jobs, 0) AS completed_jobs,
+            ROUND(AVG(r.stars)::numeric, 2) AS avg_rating
+     FROM applications a
+     LEFT JOIN profiles p ON p.public_key = a.freelancer_address
+     LEFT JOIN ratings r ON r.rated_address = a.freelancer_address
+     WHERE a.job_id = $1
+     GROUP BY a.id, p.completed_jobs
+     ORDER BY a.created_at ASC`,
     [jobId]
   );
   return rows.map(rowToApp);
@@ -89,8 +104,16 @@ async function getApplicationsForJob(jobId) {
 
 async function getApplicationsForFreelancer(freelancerAddress) {
   validatePublicKey(freelancerAddress);
-  const { rows } = await query(
-    "SELECT * FROM applications WHERE freelancer_address = $1 ORDER BY created_at DESC",
+  const { rows } = await pool.query(
+    `SELECT a.*,
+            COALESCE(p.completed_jobs, 0) AS completed_jobs,
+            ROUND(AVG(r.stars)::numeric, 2) AS avg_rating
+     FROM applications a
+     LEFT JOIN profiles p ON p.public_key = a.freelancer_address
+     LEFT JOIN ratings r ON r.rated_address = a.freelancer_address
+     WHERE a.freelancer_address = $1
+     GROUP BY a.id, p.completed_jobs
+     ORDER BY a.created_at DESC`,
     [freelancerAddress]
   );
   return rows.map(rowToApp);
@@ -100,7 +123,7 @@ async function acceptApplication(applicationId, clientAddress) {
   validatePublicKey(clientAddress);
 
   // Fetch the application
-  const { rows: appRows } = await query(
+  const { rows: appRows } = await pool.query(
     "SELECT * FROM applications WHERE id = $1",
     [applicationId]
   );
@@ -119,7 +142,7 @@ async function acceptApplication(applicationId, clientAddress) {
   }
 
   // Run accept + mass-reject atomically
-  const client = await connect();
+  const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
@@ -153,7 +176,7 @@ async function acceptApplication(applicationId, clientAddress) {
   }
 }
 
-export default {
+module.exports = {
   submitApplication,
   getApplicationsForJob,
   getApplicationsForFreelancer,

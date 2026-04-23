@@ -40,12 +40,14 @@ export interface Job {
   createdAt: string;
   updatedAt: string;
   deadline?: string;
+  timezone?: string;     // IANA timezone string (e.g., "America/New_York")
 }
 
 export interface Application {
   id: string;
   jobId: string;
   freelancerAddress: string;
+  freelancerTier?: FreelancerTier;
   proposal: string;
   bidAmount: string;     // Amount as string
   currency: Currency;    // XLM or USDC
@@ -64,6 +66,7 @@ export interface UserProfile {
   completedJobs: number;
   totalEarnedXLM: string;
   rating?: number;
+  tier?: FreelancerTier;
   /** Number of ratings received (when returned by profile API). */
   ratingCount?: number;
   createdAt: string;
