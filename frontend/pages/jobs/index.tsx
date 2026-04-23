@@ -82,12 +82,16 @@ export default function JobsPage() {
         let pagesLoaded = 0;
         let allJobs: Job[] = [];
 
+        // Determine active timezone for backend filtering
+        const activeTimezone = manualTimezone || (useGeolocation ? userTimezone : "");
+
         for (let page = 1; page <= pageFromQuery; page += 1) {
           const result = await fetchJobs({
             category: category || undefined,
             status: status || undefined,
             limit: 20,
             cursor,
+            timezone: activeTimezone || undefined,
           });
 
           const seenIds = new Set(allJobs.map((job) => job.id));
@@ -115,7 +119,7 @@ export default function JobsPage() {
     loadJobs();
 
     return () => { isCancelled = true; };
-  }, [category, status, pageFromQuery, router.isReady]);
+  }, [category, status, pageFromQuery, router.isReady, manualTimezone, useGeolocation, userTimezone]);
 
   const searchFiltered = search.trim()
     ? jobs.filter((j) =>
@@ -159,11 +163,15 @@ export default function JobsPage() {
     setError(null);
 
     try {
+      // Determine active timezone for backend filtering
+      const activeTimezone = manualTimezone || (useGeolocation ? userTimezone : "");
+
       const result = await fetchJobs({
         category: category || undefined,
         status: status || undefined,
         limit: 20,
         cursor: nextCursor,
+        timezone: activeTimezone || undefined,
       });
 
       setJobs((prev) => {

@@ -6,7 +6,10 @@
 
 const pool = require("../db/pool");
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+const VALID_PROFILE_ROLES = ["client", "freelancer", "both"];
+const VALID_PORTFOLIO_TYPES = ["github", "live", "stellar_tx"];
+const VALID_AVAILABILITY_STATUSES = ["available", "busy", "unavailable"];
+const MAX_PORTFOLIO_ITEMS = 10;
 
 function validatePublicKey(key) {
   if (!key || !/^G[A-Z0-9]{55}$/.test(key)) {
@@ -16,23 +19,128 @@ function validatePublicKey(key) {
   }
 }
 
-/** Convert snake_case DB row → camelCase API object */
-function rowToProfile(row) {
+function createValidationError(message) {
+  const e = new Error(message);
+  e.status = 400;
+  return e;
+}
+
+function validateProfileRole(role) {
+  if (role == null || role === "") return "both";
+  if (!VALID_PROFILE_ROLES.includes(role)) {
+    throw createValidationError("Role must be one of: client, freelancer, both");
+  }
+  return role;
+}
+
+function validatePortfolioUrl(url, type) {
+  if (typeof url !== "string" || !url.trim()) {
+    throw createValidationError("Each portfolio item must include a url");
+  }
+
+  const trimmedUrl = url.trim();
+  if (type === "stellar_tx") return trimmedUrl;
+
+  try {
+    const parsed = new URL(trimmedUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("Invalid protocol");
+    }
+  } catch (_) {
+    throw createValidationError("Portfolio item url must be a valid http or https URL");
+  }
+
+  return trimmedUrl;
+}
+
+function validatePortfolioItems(portfolioItems) {
+  if (portfolioItems == null) return [];
+  if (!Array.isArray(portfolioItems)) {
+    throw createValidationError("portfolioItems must be an array");
+  }
+  if (portfolioItems.length > MAX_PORTFOLIO_ITEMS) {
+    throw createValidationError(`portfolioItems cannot exceed ${MAX_PORTFOLIO_ITEMS} items`);
+  }
+
+  return portfolioItems.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw createValidationError("Each portfolio item must be an object");
+    }
+
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    const type = typeof item.type === "string" ? item.type.trim() : "";
+
+    if (!title) {
+      throw createValidationError("Each portfolio item must include a title");
+    }
+    if (!VALID_PORTFOLIO_TYPES.includes(type)) {
+      throw createValidationError("Portfolio item type must be one of: github, live, stellar_tx");
+    }
+
+    return {
+      title,
+      type,
+      url: validatePortfolioUrl(item.url, type),
+    };
+  });
+}
+
+function validateAvailabilityDate(value, fieldName) {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string") {
+    throw createValidationError(`${fieldName} must be a valid date string`);
+  }
+
+  const trimmedValue = value.trim();
+  const date = new Date(trimmedValue);
+  if (Number.isNaN(date.getTime())) {
+    throw createValidationError(`${fieldName} must be a valid date string`);
+  }
+
+  return date.toISOString();
+}
+
+function validateAvailability(availability) {
+  if (availability == null) return null;
+  if (typeof availability !== "object" || Array.isArray(availability)) {
+    throw createValidationError("availability must be an object");
+  }
+
+  const status = typeof availability.status === "string" ? availability.status.trim() : "";
+  if (!VALID_AVAILABILITY_STATUSES.includes(status)) {
+    throw createValidationError("Availability status must be one of: available, busy, unavailable");
+  }
+
+  const availableFrom = validateAvailabilityDate(availability.availableFrom, "availableFrom");
+  const availableUntil = validateAvailabilityDate(availability.availableUntil, "availableUntil");
+
+  if (availableFrom && availableUntil && new Date(availableFrom) > new Date(availableUntil)) {
+    throw createValidationError("availableFrom must be before availableUntil");
+  }
+
   return {
-    publicKey:       row.public_key,
-    displayName:     row.display_name,
-    bio:             row.bio,
-    skills:          row.skills,
-    role:            row.role,
-    completedJobs:   row.completed_jobs,
-    totalEarnedXLM:  row.total_earned_xlm,
-    rating:          row.rating !== null ? parseFloat(row.rating) : null,
-    createdAt:       row.created_at,
-    updatedAt:       row.updated_at,
+    status,
+    ...(availableFrom ? { availableFrom } : {}),
+    ...(availableUntil ? { availableUntil } : {}),
   };
 }
 
-// ─── service functions ───────────────────────────────────────────────────────
+function rowToProfile(row) {
+  return {
+    publicKey: row.public_key,
+    displayName: row.display_name,
+    bio: row.bio,
+    skills: row.skills,
+    portfolioItems: Array.isArray(row.portfolio_items) ? row.portfolio_items : [],
+    availability: row.availability && typeof row.availability === "object" ? row.availability : null,
+    role: row.role,
+    completedJobs: row.completed_jobs,
+    totalEarnedXLM: row.total_earned_xlm,
+    rating: row.rating !== null ? parseFloat(row.rating) : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 async function getProfile(publicKey) {
   validatePublicKey(publicKey);
@@ -55,39 +163,72 @@ async function getProfile(publicKey) {
   }
 
   const profile = rowToProfile(rows[0]);
-  profile.rating      = rows[0].avg_rating !== null ? parseFloat(rows[0].avg_rating) : null;
+  profile.rating = rows[0].avg_rating !== null ? parseFloat(rows[0].avg_rating) : null;
   profile.ratingCount = rows[0].rating_count;
+  profile.tier        = calculateFreelancerTier(profile.completedJobs, profile.rating);
   return profile;
 }
 
-async function upsertProfile({ publicKey, displayName, bio, skills, role }) {
+async function upsertProfile({ publicKey, displayName, bio, skills, portfolioItems, availability, role }) {
   validatePublicKey(publicKey);
 
   const safeSkills = Array.isArray(skills) ? skills.slice(0, 15) : null;
+  const safePortfolioItems = validatePortfolioItems(portfolioItems);
+  const safeAvailability = validateAvailability(availability);
+  const safeRole = validateProfileRole(role);
 
-  // INSERT … ON CONFLICT lets us handle create-or-update atomically.
   const { rows } = await pool.query(
     `
-    INSERT INTO profiles (public_key, display_name, bio, skills, role, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+    INSERT INTO profiles (public_key, display_name, bio, skills, portfolio_items, availability, role, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, NOW(), NOW())
     ON CONFLICT (public_key) DO UPDATE
       SET display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), profiles.display_name),
-          bio          = COALESCE(NULLIF(EXCLUDED.bio,          ''), profiles.bio),
-          skills       = COALESCE(EXCLUDED.skills,                  profiles.skills),
-          role         = COALESCE(NULLIF(EXCLUDED.role,         ''), profiles.role),
-          updated_at   = NOW()
+          bio = COALESCE(NULLIF(EXCLUDED.bio, ''), profiles.bio),
+          skills = COALESCE(EXCLUDED.skills, profiles.skills),
+          portfolio_items = COALESCE(EXCLUDED.portfolio_items, profiles.portfolio_items),
+          availability = COALESCE(EXCLUDED.availability, profiles.availability),
+          role = COALESCE(NULLIF(EXCLUDED.role, ''), profiles.role),
+          updated_at = NOW()
     RETURNING *
     `,
     [
       publicKey,
       displayName?.trim() || null,
-      bio?.trim()         || null,
+      bio?.trim() || null,
       safeSkills,
-      role || "both",
+      JSON.stringify(safePortfolioItems),
+      safeAvailability ? JSON.stringify(safeAvailability) : null,
+      safeRole,
     ]
   );
 
   return rowToProfile(rows[0]);
 }
 
-module.exports = { getProfile, upsertProfile };
+async function updateAvailability(publicKey, availability) {
+  validatePublicKey(publicKey);
+  const safeAvailability = validateAvailability(availability);
+
+  const { rows } = await pool.query(
+    `
+    INSERT INTO profiles (public_key, availability, created_at, updated_at)
+    VALUES ($1, $2::jsonb, NOW(), NOW())
+    ON CONFLICT (public_key) DO UPDATE
+      SET availability = EXCLUDED.availability,
+          updated_at = NOW()
+    RETURNING *
+    `,
+    [publicKey, safeAvailability ? JSON.stringify(safeAvailability) : null]
+  );
+
+  return rowToProfile(rows[0]);
+}
+
+module.exports = {
+  getProfile,
+  upsertProfile,
+  updateAvailability,
+  VALID_PORTFOLIO_TYPES,
+  VALID_AVAILABILITY_STATUSES,
+  MAX_PORTFOLIO_ITEMS,
+};

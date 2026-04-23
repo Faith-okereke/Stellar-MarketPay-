@@ -4,7 +4,7 @@
  */
 
 import { format, formatDistanceToNow } from "date-fns";
-import type { Application, Job, JobStatus } from "./types";
+import type { Application, Availability, Job, JobStatus } from "./types";
 
 function escapeCsvCell(value: string): string {
   if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
@@ -82,6 +82,35 @@ export function formatDeadline(dateString: string): string {
 
   try { return format(date, "MMM d, yyyy"); }
   catch { return ""; }
+}
+
+export function availabilityStatusLabel(status?: Availability["status"] | null): string {
+  if (!status) return "Availability not set";
+  return {
+    available: "Available",
+    busy: "Busy",
+    unavailable: "Unavailable",
+  }[status];
+}
+
+export function availabilitySummary(availability?: Availability | null): string | null {
+  if (!availability?.status) return null;
+
+  if (availability.status === "available") {
+    if (availability.availableFrom) return `Available from ${formatDate(availability.availableFrom)}`;
+    if (availability.availableUntil) return `Available until ${formatDate(availability.availableUntil)}`;
+    return "Available for new work";
+  }
+
+  if (availability.status === "busy") {
+    if (availability.availableFrom) return `Available from ${formatDate(availability.availableFrom)}`;
+    if (availability.availableUntil) return `Busy until ${formatDate(availability.availableUntil)}`;
+    return "Currently busy";
+  }
+
+  if (availability.availableFrom) return `Unavailable until ${formatDate(availability.availableFrom)}`;
+  if (availability.availableUntil) return `Unavailable until ${formatDate(availability.availableUntil)}`;
+  return "Not available for new work";
 }
 
 export function shortenAddress(address: string, chars = 6): string {
