@@ -108,6 +108,19 @@ export const JOB_CATEGORIES = [
   "Data Analysis", "Mobile Development", "Other",
 ];
 
+export const CATEGORY_ICONS: Record<string, string> = {
+  "Smart Contracts": "📜",
+  "Frontend Development": "🎨",
+  "Backend Development": "⚙️",
+  "UI/UX Design": "🖌️",
+  "Technical Writing": "✍️",
+  "DevOps": "🚀",
+  "Security Audit": "🔒",
+  "Data Analysis": "📊",
+  "Mobile Development": "📱",
+  "Other": "📦",
+};
+
 /**
  * Common Web3 and development skill suggestions for autocomplete.
  */

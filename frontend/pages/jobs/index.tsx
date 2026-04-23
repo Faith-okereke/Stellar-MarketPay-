@@ -4,7 +4,7 @@
 */
 import JobCard, { JobCardSkeleton } from "@/components/JobCard";
 import { fetchJobs } from "@/lib/api";
-import { JOB_CATEGORIES } from "@/utils/format";
+import { JOB_CATEGORIES, CATEGORY_ICONS } from "@/utils/format";
 import type { Job } from "@/utils/types";
 import clsx from "clsx";
 import Link from "next/link";
@@ -243,17 +243,30 @@ export default function JobsPage() {
             <p className="label">Category</p>
             <div className="space-y-1">
               <button onClick={() => setFilter("category", "")}
-                className={clsx("w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body",
-                  !category ? "bg-market-500/15 text-market-300 font-medium" : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8")}>
-                All Categories
+                className={clsx(
+                  "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200",
+                  !category
+                    ? "bg-market-500/20 text-market-300 font-medium ring-1 ring-market-500/30"
+                    : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8 hover:translate-x-0.5"
+                )}>
+                🗂️ All Categories
+                <span className="ml-1 text-xs text-amber-800">({jobs.length})</span>
               </button>
-              {JOB_CATEGORIES.map((cat) => (
-                <button key={cat} onClick={() => setFilter("category", cat)}
-                  className={clsx("w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body",
-                    category === cat ? "bg-market-500/15 text-market-300 font-medium" : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8")}>
-                  {cat}
-                </button>
-              ))}
+              {JOB_CATEGORIES.map((cat) => {
+                const count = jobs.filter((j) => j.category === cat).length;
+                return (
+                  <button key={cat} onClick={() => setFilter("category", cat)}
+                    className={clsx(
+                      "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200",
+                      category === cat
+                        ? "bg-market-500/20 text-market-300 font-medium ring-1 ring-market-500/30"
+                        : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8 hover:translate-x-0.5"
+                    )}>
+                    {CATEGORY_ICONS[cat] ?? ""} {cat}
+                    <span className="ml-1 text-xs text-amber-800">({count})</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </aside>
