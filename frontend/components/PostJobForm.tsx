@@ -49,7 +49,7 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
   const router = useRouter();
   const toast = useToast();
   const [form, setForm] = useState({
-    title: "", description: "", budget: "", category: "", skillInput: "", deadline: "", currency: "XLM" as Currency,
+    title: "", description: "", budget: "", category: "", skillInput: "", deadline: "", timezone: "",
   });
   const [skills, setSkills] = useState<string[]>([]);
   const [templates, setTemplates] = useState<JobTemplate[]>([]);
@@ -235,6 +235,7 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
         category: form.category,
         skills,
         deadline: form.deadline || undefined,
+        timezone: form.timezone || undefined,
         clientAddress: publicKey,
       });
 
@@ -506,6 +507,29 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
           <label className="label">Deadline <span className="normal-case text-amber-900 font-normal">(optional)</span></label>
           <input type="date" value={form.deadline} onChange={(e) => set("deadline", e.target.value)}
             className="input-field" min={new Date().toISOString().split("T")[0]} />
+        </div>
+
+        {/* Timezone (optional) */}
+        <div>
+          <label className="label">Timezone/Location <span className="normal-case text-amber-900 font-normal">(optional)</span></label>
+          <select value={form.timezone} onChange={(e) => set("timezone", e.target.value)}
+            className="input-field appearance-none cursor-pointer">
+            <option value="">No timezone preference</option>
+            <option value="UTC">UTC (Universal)</option>
+            <option value="America/New_York">America/New York (EST/EDT)</option>
+            <option value="America/Los_Angeles">America/Los Angeles (PST/PDT)</option>
+            <option value="America/Chicago">America/Chicago (CST/CDT)</option>
+            <option value="Europe/London">Europe/London (GMT/BST)</option>
+            <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
+            <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
+            <option value="Asia/Tokyo">Asia/Tokyo (JST)</option>
+            <option value="Asia/Shanghai">Asia/Shanghai (CST)</option>
+            <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
+            <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+            <option value="Australia/Sydney">Australia/Sydney (AEST/AEDT)</option>
+            <option value="Pacific/Auckland">Pacific/Auckland (NZST/NZDT)</option>
+          </select>
+          <p className="mt-1 text-xs text-amber-800/50">Helps freelancers in compatible timezones find your job</p>
         </div>
 
         {/* Multi-step progress indicator */}

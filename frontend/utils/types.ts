@@ -26,6 +26,7 @@ export interface Job {
   createdAt: string;
   updatedAt: string;
   deadline?: string;
+  timezone?: string;     // IANA timezone string (e.g., "America/New_York")
 }
 
 export interface Application {

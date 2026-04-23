@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   escrow_contract_id  TEXT,
   applicant_count     INTEGER     NOT NULL DEFAULT 0,
   deadline            TIMESTAMPTZ,
+  timezone            TEXT,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
