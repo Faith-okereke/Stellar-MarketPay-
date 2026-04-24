@@ -199,7 +199,7 @@ export async function buildReleaseEscrowTransaction(
     );
 
     const built = new TransactionBuilder(account, {
-      fee: BASE_FEE,
+      fee: "1000000",
       networkPassphrase: NETWORK_PASSPHRASE,
     })
       .addOperation(op)
@@ -224,7 +224,7 @@ export async function submitSignedSorobanTransaction(signedXdr: string): Promise
     throw new Error(friendlySorobanError(err));
   }
 
-  let sent: Api.SendTransactionResponse;
+  let sent: SorobanRpc.Api.SendTransactionResponse;
   try {
     sent = await sorobanServer.sendTransaction(tx);
   } catch (err: unknown) {
@@ -246,10 +246,10 @@ export async function submitSignedSorobanTransaction(signedXdr: string): Promise
   const maxAttempts = 90;
   for (let i = 0; i < maxAttempts; i += 1) {
     const info = await sorobanServer.getTransaction(hash);
-    if (info.status === Api.GetTransactionStatus.SUCCESS) {
+    if (info.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
       return { hash };
     }
-    if (info.status === Api.GetTransactionStatus.FAILED) {
+    if (info.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
       throw new Error(
         "The on-chain transaction failed. Open the explorer link to see details, or verify the escrow state matches this job."
       );
@@ -369,4 +369,30 @@ export async function submitSorobanTransaction(signedXDR: string): Promise<strin
 export function accountUrl(address: string): string {
   const net = NETWORK === "mainnet" ? "public" : "testnet";
   return `https://stellar.expert/explorer/${net}/account/${address}`;
+}
+
+/**
+ * Streams transactions for a given account using Horizon SSE.
+ * @param publicKey The account to watch.
+ * @param onTransaction Callback triggered when a new transaction is detected.
+ * @returns A function to close the stream.
+ */
+export function streamAccountTransactions(
+  publicKey: string,
+  onTransaction: (tx: Horizon.ServerApi.TransactionRecord) => void
+): () => void {
+  const closeStream = server
+    .transactions()
+    .forAccount(publicKey)
+    .cursor("now")
+    .stream({
+      onmessage: (tx) => {
+        onTransaction(tx);
+      },
+      onerror: (error) => {
+        console.error("Horizon stream error:", error);
+      },
+    });
+
+  return closeStream;
 }

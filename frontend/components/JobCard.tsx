@@ -3,7 +3,15 @@
  * Displays a single job listing in the browse grid.
  */
 import Link from "next/link";
-import { formatDeadline, formatXLM, statusClass, statusLabel, timeAgo, formatUSDEquivalent } from "@/utils/format";
+import {
+  formatDeadline,
+  formatXLM,
+  getDeadlineState,
+  statusClass,
+  statusLabel,
+  timeAgo,
+  formatUSDEquivalent,
+} from "@/utils/format";
 import type { Job } from "@/utils/types";
 import { usePriceContext } from "@/contexts/PriceContext";
 
@@ -13,10 +21,12 @@ export default function JobCard({ job }: JobCardProps) {
   const { xlmPriceUsd } = usePriceContext();
   const usdEquivalent = formatUSDEquivalent(job.budget, xlmPriceUsd);
 
-  const hasValidDeadline = !!job.deadline;
+  const hasValidDeadline = Boolean(job.deadline && formatDeadline(job.deadline));
   const formattedDeadline = job.deadline ? formatDeadline(job.deadline) : "";
-  const isClosed = job.status === "cancelled" || job.status === "completed";
-  const isClosingSoon = job.deadline ? new Date(job.deadline).getTime() - Date.now() < 86400000 : false;
+  const deadlineState = getDeadlineState(job.deadline);
+  const isStatusClosed = job.status === "cancelled" || job.status === "completed";
+  const showClosedBadge = isStatusClosed || deadlineState === "closed";
+  const showClosingSoonBadge = !showClosedBadge && deadlineState === "closing_soon";
   return (
     <Link href={`/jobs/${job.id}`}>
       <div className="card-hover group animate-fade-in">
@@ -51,11 +61,17 @@ export default function JobCard({ job }: JobCardProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-3 border-t border-[rgba(251,191,36,0.07)]">
-          <div>
+          <div className="group/tooltip relative">
             <p className="text-xs text-amber-800 mb-0.5">Budget</p>
-            <p className="font-mono font-semibold text-market-400 text-sm">{formatXLM(job.budget)}</p>
+            <p className="font-mono font-semibold text-market-400 text-sm cursor-help">{formatXLM(job.budget)}</p>
             {usdEquivalent && (
-              <p className="text-xs text-amber-800/60 mt-0.5">{usdEquivalent}</p>
+              <div className="absolute bottom-full left-0 mb-2 hidden group-hover/tooltip:block z-20">
+                <div className="bg-ink-800 border border-market-500/30 text-amber-100 text-[10px] py-1.5 px-2.5 rounded shadow-xl whitespace-nowrap backdrop-blur-md">
+                  <p className="font-semibold text-market-300">{usdEquivalent}</p>
+                  <p className="text-amber-800/80 mt-0.5">{getMonthlyEstimate(job.budget, xlmPriceUsd)}</p>
+                </div>
+                <div className="w-2 h-2 bg-ink-800 border-r border-b border-market-500/30 rotate-45 -mt-1 ml-3" />
+              </div>
             )}
           </div>
           <div className="text-right">
@@ -63,12 +79,12 @@ export default function JobCard({ job }: JobCardProps) {
               {job.applicantCount} applicant{job.applicantCount !== 1 ? "s" : ""}
               {hasValidDeadline ? ` | Due ${formattedDeadline}` : ""}
             </p>
-            {isClosed && (
+            {showClosedBadge && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide bg-slate-500/20 text-slate-300 border-slate-400/30 mb-0.5">
                 Closed
               </span>
             )}
-            {!isClosed && isClosingSoon && (
+            {showClosingSoonBadge && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide bg-red-500/20 text-red-300 border-red-400/40 mb-0.5">
                 Closing soon
               </span>
@@ -125,4 +141,3 @@ export function JobCardSkeleton() {
     </div>
   );
 }
-

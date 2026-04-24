@@ -6,11 +6,12 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import { fetchMyJobs, fetchMyApplications } from "@/lib/api";
-import { getXLMBalance, getUSDCBalance } from "@/lib/stellar";
+import { getXLMBalance, getUSDCBalance, streamAccountTransactions } from "@/lib/stellar";
 import { formatXLM, shortenAddress, timeAgo, statusLabel, statusClass, copyToClipboard, exportJobsToCSV, exportApplicationsToCSV } from "@/utils/format";
 import type { Job, Application } from "@/utils/types";
 import EditProfileForm from "@/components/EditProfileForm";
 import SendPaymentForm from "@/components/SendPaymentForm";
+import { useToast } from "@/components/Toast";
 import clsx from "clsx";
 
 interface DashboardProps {
@@ -43,8 +44,13 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
     }
   };
 
+  const [processedTxs, setProcessedTxs] = useState<Set<string>>(new Set());
+  const { info, success } = useToast();
+
   useEffect(() => {
     if (!publicKey) return;
+    
+    // Initial fetch
     Promise.all([
       fetchMyJobs(publicKey),
       fetchMyApplications(publicKey),
@@ -59,7 +65,41 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [publicKey]);
+
+    // Real-time stream
+    const onTransaction = (tx: any) => {
+      if (processedTxs.has(tx.hash)) return;
+      setProcessedTxs((prev) => new Set(prev).add(tx.hash));
+
+      // Try to find a matching job in our current lists
+      // We assume the memo contains the job ID (common pattern in this app's context)
+      const jobId = tx.memo;
+      if (!jobId) return;
+
+      const job = myJobs.find(j => j.id === jobId);
+      if (job) {
+        success(`New application received for: ${job.title}`);
+        window.dispatchEvent(new CustomEvent("stellar-activity", { detail: { type: "job", id: jobId } }));
+        // Refresh jobs to update applicant count
+        fetchMyJobs(publicKey).then(setMyJobs);
+        return;
+      }
+
+      const app = myApplications.find(a => a.jobId === jobId);
+      if (app) {
+        info(`Application status updated for: ${jobId.slice(0, 8)}...`);
+        window.dispatchEvent(new CustomEvent("stellar-activity", { detail: { type: "app", id: jobId } }));
+        // Refresh applications to update status
+        fetchMyApplications(publicKey).then(setMyApplications);
+        return;
+      }
+    };
+
+    const closeStream = streamAccountTransactions(publicKey, onTransaction);
+    return () => {
+      closeStream();
+    };
+  }, [publicKey, myJobs, myApplications, processedTxs]);
 
   if (!publicKey) {
     return (

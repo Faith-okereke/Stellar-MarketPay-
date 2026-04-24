@@ -6,10 +6,16 @@ import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
+import FreelancerTierBadge from "@/components/FreelancerTierBadge";
 import { fetchPublicProfile } from "@/lib/api";
-import { formatXLM, shortenAddress } from "@/utils/format";
+import {
+  availabilityStatusLabel,
+  availabilitySummary,
+  formatXLM,
+  shortenAddress,
+} from "@/utils/format";
 import { accountUrl, isValidStellarAddress } from "@/lib/stellar";
-import type { UserProfile } from "@/utils/types";
+import type { AvailabilityStatus, PortfolioItem, UserProfile } from "@/utils/types";
 
 type LoadState =
   | { status: "loading" }
@@ -17,6 +23,33 @@ type LoadState =
   | { status: "not_found" }
   | { status: "error"; message: string }
   | { status: "ok"; profile: UserProfile };
+
+function getPortfolioHref(item: PortfolioItem) {
+  if (item.type === "stellar_tx") {
+    return `https://stellar.expert/explorer/public/tx/${encodeURIComponent(item.url)}`;
+  }
+  return item.url;
+}
+
+function getPortfolioTypeLabel(item: PortfolioItem) {
+  switch (item.type) {
+    case "github":
+      return "GitHub Repo";
+    case "live":
+      return "Live URL";
+    case "stellar_tx":
+      return "Stellar Proof";
+    default:
+      return "Portfolio";
+  }
+}
+
+function getAvailabilityBadgeClass(status?: AvailabilityStatus | null) {
+  if (status === "available") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+  if (status === "busy") return "bg-amber-500/10 text-amber-300 border-amber-500/20";
+  if (status === "unavailable") return "bg-red-500/10 text-red-400 border-red-500/20";
+  return "bg-market-500/10 text-market-300 border-market-500/20";
+}
 
 export default function PublicFreelancerProfilePage() {
   const router = useRouter();
@@ -36,8 +69,8 @@ export default function PublicFreelancerProfilePage() {
 
   const metaDescription = useMemo(() => {
     if (state.status === "ok" && state.profile.bio?.trim()) {
-      const b = state.profile.bio.trim();
-      return b.length > 160 ? `${b.slice(0, 157)}…` : b;
+      const bio = state.profile.bio.trim();
+      return bio.length > 160 ? `${bio.slice(0, 157)}...` : bio;
     }
     return "View freelancer profile on Stellar MarketPay.";
   }, [state]);
@@ -64,10 +97,10 @@ export default function PublicFreelancerProfilePage() {
         if (cancelled) return;
         if (profile === null) setState({ status: "not_found" });
         else setState({ status: "ok", profile });
-      } catch (e: unknown) {
+      } catch (error: unknown) {
         if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "Could not load profile.";
-        setState({ status: "error", message: msg });
+        const message = error instanceof Error ? error.message : "Could not load profile.";
+        setState({ status: "error", message });
       }
     })();
 
@@ -142,6 +175,9 @@ export default function PublicFreelancerProfilePage() {
                 <h1 className="font-display text-2xl sm:text-3xl font-bold text-amber-100 break-words">
                   {state.profile.displayName?.trim() || shortenAddress(state.profile.publicKey)}
                 </h1>
+                <div className="mt-3">
+                  <FreelancerTierBadge tier={state.profile.tier} className="text-sm" />
+                </div>
                 <p className="text-xs sm:text-sm text-amber-800 mt-2 font-mono break-all">
                   {state.profile.publicKey}
                 </p>
@@ -156,6 +192,22 @@ export default function PublicFreelancerProfilePage() {
                   View on Stellar Expert →
                 </a>
               </div>
+            </div>
+
+            <div className="mb-6 sm:mb-8 rounded-xl border border-market-500/15 bg-ink-900/50 p-4">
+              <div className="flex flex-wrap items-center gap-3 mb-2">
+                <h2 className="label !mb-0">Availability</h2>
+                <span
+                  className={`text-xs px-2.5 py-1 rounded-full border ${getAvailabilityBadgeClass(
+                    state.profile.availability?.status
+                  )}`}
+                >
+                  {availabilityStatusLabel(state.profile.availability?.status)}
+                </span>
+              </div>
+              <p className="text-sm text-amber-700/90">
+                {availabilitySummary(state.profile.availability) || "Availability has not been set yet."}
+              </p>
             </div>
 
             {state.profile.bio?.trim() ? (
@@ -182,9 +234,19 @@ export default function PublicFreelancerProfilePage() {
                   {formatXLM(state.profile.totalEarnedXLM ?? "0")}
                 </p>
               </div>
+              <div className="rounded-xl bg-ink-900/50 border border-market-500/10 p-4">
+                <p className="label mb-1">Freelancer tier</p>
+                <FreelancerTierBadge tier={state.profile.tier} className="mt-2" />
+              </div>
+              <div className="rounded-xl bg-ink-900/50 border border-market-500/10 p-4">
+                <p className="label mb-1">Average rating</p>
+                <p className="font-display text-2xl sm:text-3xl font-bold text-market-400">
+                  {state.profile.rating?.toFixed(2) ?? "New"}
+                </p>
+              </div>
             </div>
 
-            <div>
+            <div className="mb-6 sm:mb-8">
               <h2 className="label mb-3">Skills</h2>
               {state.profile.skills && state.profile.skills.length > 0 ? (
                 <ul className="flex flex-wrap gap-2">
@@ -199,6 +261,41 @@ export default function PublicFreelancerProfilePage() {
                 </ul>
               ) : (
                 <p className="text-amber-900/80 text-sm italic">No skills listed yet.</p>
+              )}
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="label">Portfolio</h2>
+                <p className="text-xs text-amber-800">
+                  {(state.profile.portfolioItems || []).length}/10
+                </p>
+              </div>
+
+              {state.profile.portfolioItems && state.profile.portfolioItems.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {state.profile.portfolioItems.map((item, index) => (
+                    <a
+                      key={`${item.type}-${item.url}-${index}`}
+                      href={getPortfolioHref(item)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-xl border border-market-500/15 bg-ink-900/50 p-4 hover:border-market-400/40 hover:bg-ink-900/70 transition-colors"
+                    >
+                      <p className="text-xs uppercase tracking-[0.18em] text-market-300/80 mb-2">
+                        {getPortfolioTypeLabel(item)}
+                      </p>
+                      <h3 className="text-amber-100 font-medium text-base break-words mb-2">
+                        {item.title}
+                      </h3>
+                      <p className="text-sm text-amber-700/90 break-all">
+                        {item.type === "stellar_tx" ? item.url : getPortfolioHref(item)}
+                      </p>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-amber-900/80 text-sm italic">No portfolio items yet.</p>
               )}
             </div>
           </article>

@@ -5,6 +5,7 @@
 "use strict";
 
 import { query } from "../db/pool";
+import { getTimezoneOffset } from "date-fns-tz";
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -33,6 +34,37 @@ function validatePublicKey(key) {
   }
 }
 
+/**
+ * Check if a job's timezone is compatible with the user's timezone.
+ * Compatible if the time difference is within ±3 hours.
+ * 
+ * @param {string} jobTimezone - IANA timezone string of the job (e.g., "America/New_York")
+ * @param {string} userTimezone - IANA timezone string of the user (e.g., "Europe/London")
+ * @returns {boolean} true if timezones are compatible or if job has no timezone restriction
+ */
+function isTimezoneCompatible(jobTimezone, userTimezone) {
+  // Jobs without timezone restriction are visible to all users
+  if (!jobTimezone) return true;
+  // If no user timezone provided, show all jobs
+  if (!userTimezone) return true;
+
+  try {
+    const now = new Date();
+    // Get UTC offset in milliseconds for both timezones
+    const userOffset = getTimezoneOffset(userTimezone, now);
+    const jobOffset = getTimezoneOffset(jobTimezone, now);
+    
+    // Calculate the absolute difference in hours
+    const diffHours = Math.abs(userOffset - jobOffset) / (1000 * 60 * 60);
+    
+    // Return true if within ±3 hour range
+    return diffHours <= 3;
+  } catch (err) {
+    // If timezone parsing fails, show the job (fail-safe)
+    return true;
+  }
+}
+
 /** Convert snake_case DB row → camelCase API object */
 function rowToJob(row) {
   return {
@@ -52,6 +84,8 @@ function rowToJob(row) {
     boosted:           row.boosted || false,
     boostedUntil:      row.boosted_until,
     deadline:          row.deadline,
+    timezone:          row.timezone,
+    screeningQuestions: row.screening_questions || [],
     createdAt:         row.created_at,
     updatedAt:         row.updated_at,
   };
@@ -83,6 +117,7 @@ async function createJob({ title, description, budget, currency = 'XLM', categor
   }
 
   const safeSkills = Array.isArray(skills) ? skills.slice(0, 8) : [];
+  const safeScreeningQuestions = Array.isArray(screeningQuestions) ? screeningQuestions.slice(0, 5).filter(q => q && q.trim().length > 0) : [];
 
   const { rows } = await query(
     `
@@ -100,6 +135,8 @@ async function createJob({ title, description, budget, currency = 'XLM', categor
       safeSkills,
       clientAddress,
       deadline || null,
+      timezone || null,
+      safeScreeningQuestions,
     ]
   );
 
@@ -133,7 +170,7 @@ function decodeCursor(cursor) {
   }
 }
 
-async function listJobs({ category, status = "open", limit = 50, search, cursor } = {}) {
+async function listJobs({ category, status = "open", limit = 50, search, cursor, timezone } = {}) {
   const conditions = [];
   const params     = [];
 
@@ -180,8 +217,15 @@ async function listJobs({ category, status = "open", limit = 50, search, cursor 
   const currentRows = hasMore ? rows.slice(0, safeLimit) : rows;
   const nextCursor = hasMore ? encodeCursor(currentRows[currentRows.length - 1]) : null;
 
+  // Apply timezone filtering on the results
+  // This is done after fetching to avoid complex SQL timezone calculations
+  let filteredJobs = currentRows.map(rowToJob);
+  if (timezone) {
+    filteredJobs = filteredJobs.filter(job => isTimezoneCompatible(job.timezone, timezone));
+  }
+
   return {
-    jobs: currentRows.map(rowToJob),
+    jobs: filteredJobs,
     nextCursor,
   };
 }

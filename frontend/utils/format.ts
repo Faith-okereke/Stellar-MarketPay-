@@ -4,7 +4,7 @@
  */
 
 import { format, formatDistanceToNow } from "date-fns";
-import type { Application, Job, JobStatus } from "./types";
+import type { Application, Availability, Job, JobStatus } from "./types";
 
 function escapeCsvCell(value: string): string {
   if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
@@ -84,6 +84,21 @@ export function formatDeadline(dateString: string): string {
   catch { return ""; }
 }
 
+export type DeadlineState = "none" | "closing_soon" | "closed";
+
+export function getDeadlineState(dateString?: string | null, now = Date.now()): DeadlineState {
+  if (!dateString) return "none";
+
+  const deadline = new Date(dateString);
+  const deadlineTime = deadline.getTime();
+  if (Number.isNaN(deadlineTime)) return "none";
+
+  if (deadlineTime <= now) return "closed";
+  if (deadlineTime - now <= 72 * 60 * 60 * 1000) return "closing_soon";
+
+  return "none";
+}
+
 export function shortenAddress(address: string, chars = 6): string {
   if (!address || address.length < chars * 2) return address;
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
@@ -107,6 +122,19 @@ export const JOB_CATEGORIES = [
   "UI/UX Design", "Technical Writing", "DevOps", "Security Audit",
   "Data Analysis", "Mobile Development", "Other",
 ];
+
+export const CATEGORY_ICONS: Record<string, string> = {
+  "Smart Contracts": "📜",
+  "Frontend Development": "🎨",
+  "Backend Development": "⚙️",
+  "UI/UX Design": "🖌️",
+  "Technical Writing": "✍️",
+  "DevOps": "🚀",
+  "Security Audit": "🔒",
+  "Data Analysis": "📊",
+  "Mobile Development": "📱",
+  "Other": "📦",
+};
 
 /**
  * Common Web3 and development skill suggestions for autocomplete.
@@ -134,7 +162,7 @@ export const SKILL_SUGGESTIONS = [
 
 /**
  * Converts an XLM amount to a USD equivalent string.
- * Returns null if price is unavailable so callers can fail silently.
+ * Returns null if price is unavailable.
  */
 export function formatUSDEquivalent(xlmAmount: string | number, xlmPriceUsd: number | null): string | null {
   if (xlmPriceUsd === null) return null;
@@ -142,4 +170,16 @@ export function formatUSDEquivalent(xlmAmount: string | number, xlmPriceUsd: num
   if (isNaN(num)) return null;
   const usd = (num * xlmPriceUsd).toFixed(2);
   return `≈ $${usd} USD`;
+}
+
+/**
+ * Calculates a monthly equivalent estimate for a given budget.
+ * If no duration is provided, it assumes the budget is for a month of work.
+ */
+export function getMonthlyEstimate(xlmAmount: string | number, xlmPriceUsd: number | null): string | null {
+  if (xlmPriceUsd === null) return null;
+  const num = typeof xlmAmount === "string" ? parseFloat(xlmAmount) : xlmAmount;
+  if (isNaN(num)) return null;
+  const monthlyUsd = (num * xlmPriceUsd).toFixed(2);
+  return `$${monthlyUsd}/mo est.`;
 }
