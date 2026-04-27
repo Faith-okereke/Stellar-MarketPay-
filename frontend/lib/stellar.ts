@@ -139,6 +139,70 @@ export async function buildPaymentTransaction({
   return builder.build();
 }
 
+/**
+ * Build a Strict Send Path Payment transaction.
+ * This converts a source asset to a destination asset via the DEX.
+ */
+export async function buildPathPaymentTransaction({
+  fromPublicKey,
+  toPublicKey,
+  sendAsset,
+  sendAmount,
+  destAsset,
+  destMin,
+  path,
+}: {
+  fromPublicKey: string;
+  toPublicKey: string;
+  sendAsset: Asset;
+  sendAmount: string;
+  destAsset: Asset;
+  destMin: string;
+  path: Asset[];
+}) {
+  const sourceAccount = await server.loadAccount(fromPublicKey);
+
+  const builder = new TransactionBuilder(sourceAccount, {
+    fee: "1000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(Operation.pathPaymentStrictSend({
+      sendAsset,
+      sendAmount,
+      destination: toPublicKey,
+      destAsset,
+      destMin,
+      path,
+    }))
+    .setTimeout(60);
+
+  return builder.build();
+}
+
+/**
+ * Get the best path and estimated exchange rate for a swap.
+ */
+export async function getPathPaymentPrice(
+  sourceAsset: Asset,
+  sourceAmount: string,
+  destAsset: Asset
+): Promise<{ amount: string; path: Asset[] } | null> {
+  try {
+    const paths = await server.strictSendPaths(sourceAsset, sourceAmount, [destAsset]).call();
+    if (paths.records.length === 0) return null;
+    
+    // Pick the one with the highest destination amount
+    const bestPath = paths.records[0];
+    return {
+      amount: bestPath.destination_amount,
+      path: bestPath.path.map(p => new Asset(p.asset_code || "XLM", p.asset_issuer)),
+    };
+  } catch (err) {
+    console.error("Error fetching path payment price:", err);
+    return null;
+  }
+}
+
 export async function submitTransaction(signedXDR: string) {
   const tx = new Transaction(signedXDR, NETWORK_PASSPHRASE);
   try {
@@ -196,6 +260,41 @@ export async function buildReleaseEscrowTransaction(
       "release_escrow",
       nativeToScVal(jobId),
       Address.fromString(clientAddress).toScVal()
+    );
+
+    const built = new TransactionBuilder(account, {
+      fee: "1000000",
+      networkPassphrase: NETWORK_PASSPHRASE,
+    })
+      .addOperation(op)
+      .setTimeout(60)
+      .build();
+
+    return await sorobanServer.prepareTransaction(built);
+  } catch (err: unknown) {
+    throw new Error(friendlySorobanError(err));
+  }
+}
+
+/**
+ * Builds a prepared Soroban transaction that invokes `release_with_conversion(job_id, client, target_token, min_amount_out)` on the escrow contract.
+ */
+export async function buildReleaseWithConversionTransaction(
+  contractId: string,
+  jobId: string,
+  clientAddress: string,
+  targetTokenAddress: string,
+  minAmountOut: bigint
+): Promise<Transaction> {
+  try {
+    const account = await sorobanServer.getAccount(clientAddress);
+    const contract = new Contract(contractId);
+    const op = contract.call(
+      "release_with_conversion",
+      nativeToScVal(jobId),
+      Address.fromString(clientAddress).toScVal(),
+      Address.fromString(targetTokenAddress).toScVal(),
+      nativeToScVal(minAmountOut, { type: "i128" })
     );
 
     const built = new TransactionBuilder(account, {

@@ -16,11 +16,18 @@ import { formatXLM, timeAgo, formatDate, shortenAddress, statusLabel, statusClas
 import {
   accountUrl,
   buildReleaseEscrowTransaction,
+  buildReleaseWithConversionTransaction,
   explorerUrl,
+  getPathPaymentPrice,
   submitSignedSorobanTransaction,
+  USDC_ISSUER,
+  USDC_SAC_ADDRESS,
+  XLM_SAC_ADDRESS,
 } from "@/lib/stellar";
+import { Asset } from "@stellar/stellar-sdk";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import type { Application, AvailabilityStatus, Job, UserProfile } from "@/utils/types";
+import clsx from "clsx";
 
 interface JobDetailProps {
   publicKey: string | null;
@@ -52,9 +59,44 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const [showShareModal, setShowShareModal] = useState(false);
   const [prefillData, setPrefillData] = useState<any>(null);
 
+  const [releaseCurrency, setReleaseCurrency] = useState<"XLM" | "USDC">("XLM");
+  const [estimatedOutput, setEstimatedOutput] = useState<string | null>(null);
+  const [fetchingPrice, setFetchingPrice] = useState(false);
+
   const isClient = publicKey && job?.clientAddress === publicKey;
   const isFreelancer = publicKey && job?.freelancerAddress === publicKey;
   const hasApplied = applications.some((application) => application.freelancerAddress === publicKey);
+
+  useEffect(() => {
+    if (job?.currency) setReleaseCurrency(job.currency as any);
+  }, [job?.currency]);
+
+  useEffect(() => {
+    if (!job || !releaseCurrency || releaseCurrency === job.currency) {
+      setEstimatedOutput(null);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchPrice = async () => {
+      setFetchingPrice(true);
+      try {
+        const sourceAsset = job.currency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
+        const destAsset = releaseCurrency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
+        const res = await getPathPaymentPrice(sourceAsset, job.budget, destAsset);
+        if (!cancelled && res) {
+          setEstimatedOutput(res.amount);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!cancelled) setFetchingPrice(false);
+      }
+    };
+
+    fetchPrice();
+    return () => { cancelled = true; };
+  }, [releaseCurrency, job?.budget, job?.currency]);
 
   useEffect(() => {
     if (!id) return;
@@ -160,7 +202,24 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     setReleaseSyncedWithBackend(false);
 
     try {
-      const prepared = await buildReleaseEscrowTransaction(job.escrowContractId, job.id, publicKey);
+      let prepared;
+      if (releaseCurrency !== job.currency && estimatedOutput) {
+        // Issue #104: Release with conversion
+        const targetTokenAddress = releaseCurrency === "XLM" ? XLM_SAC_ADDRESS : USDC_SAC_ADDRESS;
+        // Apply 1% slippage protection (destMin = estimatedOutput * 0.99)
+        const minAmountOut = BigInt(Math.round(parseFloat(estimatedOutput) * 0.99 * (releaseCurrency === "XLM" ? 10_000_000 : 1_000_000)));
+        
+        prepared = await buildReleaseWithConversionTransaction(
+          job.escrowContractId,
+          job.id,
+          publicKey,
+          targetTokenAddress,
+          minAmountOut
+        );
+      } else {
+        prepared = await buildReleaseEscrowTransaction(job.escrowContractId, job.id, publicKey);
+      }
+
       const { signedXDR, error: signError } = await signTransactionWithWallet(prepared.toXDR());
       if (signError || !signedXDR) {
         setActionError(signError || "Signing was cancelled.");
@@ -447,7 +506,72 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               </button>
             )}
 
-            {actionError && <p className="mt-3 text-red-400 text-sm">{actionError}</p>}
+        {isClient && job.status === "in_progress" && (
+          <div className="card mb-6 border-market-500/30">
+            <h2 className="font-display text-xl font-bold text-amber-100 mb-4">Escrow Management</h2>
+            <p className="text-amber-800 text-sm mb-6">
+              The work is in progress. Once you are satisfied with the deliverables, you can release the funds to the freelancer.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">
+                  Release Asset
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setReleaseCurrency(job.currency as any)}
+                    className={clsx(
+                      "flex-1 py-2 px-4 rounded border transition-all",
+                      releaseCurrency === job.currency
+                        ? "bg-market-500/20 border-market-400 text-market-400"
+                        : "bg-ink-900 border-market-500/10 text-amber-800 hover:border-market-500/30"
+                    )}
+                  >
+                    {job.currency} (Default)
+                  </button>
+                  <button
+                    onClick={() => setReleaseCurrency(job.currency === "USDC" ? "XLM" : "USDC")}
+                    className={clsx(
+                      "flex-1 py-2 px-4 rounded border transition-all",
+                      releaseCurrency !== job.currency
+                        ? "bg-market-500/20 border-market-400 text-market-400"
+                        : "bg-ink-900 border-market-500/10 text-amber-800 hover:border-market-500/30"
+                    )}
+                  >
+                    {job.currency === "USDC" ? "XLM" : "USDC"}
+                  </button>
+                </div>
+              </div>
+
+              {releaseCurrency !== job.currency && (
+                <div className="bg-market-500/5 p-4 rounded border border-market-500/10 animate-fade-in">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs text-amber-800">Estimated Output</span>
+                    {fetchingPrice ? (
+                      <Spinner />
+                    ) : (
+                      <span className="font-mono text-market-400">
+                        {estimatedOutput} {releaseCurrency}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-amber-900">
+                    Conversion via Stellar DEX path payment. Rate is estimated and subject to slippage.
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={handleReleaseEscrow}
+                disabled={releasingEscrow || (releaseCurrency !== job.currency && !estimatedOutput)}
+                className="btn-primary w-full py-3 flex items-center justify-center gap-2"
+              >
+                {releasingEscrow ? <Spinner /> : "Release Escrow"}
+              </button>
+              
+              {actionError && <p className="mt-3 text-red-400 text-sm">{actionError}</p>}
+            </div>
           </div>
         )}
 
