@@ -3,6 +3,7 @@
  */
 import WalletConnect from "@/components/WalletConnect";
 import PostJobForm from "@/components/PostJobForm";
+import Link from "next/link";
 
 interface PostJobProps {
   publicKey: string | null;
@@ -21,7 +22,18 @@ export default function PostJob({ publicKey, onConnect }: PostJobProps) {
           <WalletConnect onConnect={onConnect} />
         </div>
       ) : (
-        <PostJobForm publicKey={publicKey} />
+        <div className="space-y-6">
+          <div className="card max-w-2xl mx-auto flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm text-amber-100 font-medium">Need to draft scope with freelancer first?</p>
+              <p className="text-xs text-amber-800">Open a realtime shared document and finalize directly into this form.</p>
+            </div>
+            <Link href="/scope/new" className="btn-secondary px-4 py-2 text-sm whitespace-nowrap">
+              Start Scope Session
+            </Link>
+          </div>
+          <PostJobForm publicKey={publicKey} />
+        </div>
       )}
     </div>
   );

@@ -36,6 +36,7 @@ type JobTemplate = {
 };
 
 const JOB_TEMPLATES_STORAGE_KEY = "stellar-marketpay-job-templates";
+const SCOPE_PREFILL_STORAGE_KEY = "marketpay_scope_prefill";
 const emptyForm: FormState = {
   title: "",
   description: "",
@@ -59,6 +60,27 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rawPrefill = window.localStorage.getItem(SCOPE_PREFILL_STORAGE_KEY);
+    if (!rawPrefill) return;
+    try {
+      const prefill = JSON.parse(rawPrefill);
+      if (prefill && typeof prefill === "object") {
+        setForm((prev) => ({
+          ...prev,
+          title: typeof prefill.title === "string" ? prefill.title : prev.title,
+          description: typeof prefill.description === "string" ? prefill.description : prev.description,
+          category: typeof prefill.category === "string" ? prefill.category : prev.category,
+        }));
+      }
+    } catch (_) {
+      // Ignore malformed prefill payload
+    } finally {
+      window.localStorage.removeItem(SCOPE_PREFILL_STORAGE_KEY);
+    }
+  }, []);
 
   const usdPreview = formatUSDEquivalent(form.budget, xlmPriceUsd);
   const monthlyEst = getMonthlyEstimate(form.budget, xlmPriceUsd);
