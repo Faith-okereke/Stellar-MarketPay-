@@ -6,6 +6,21 @@
 export type JobStatus = "open" | "in_progress" | "completed" | "cancelled";
 export type UserRole  = "client" | "freelancer" | "both";
 export type Currency  = "XLM" | "USDC";
+export type FreelancerTier = "Newcomer" | "Rising Star" | "Expert" | "Top Talent";
+export type PortfolioItemType = "github" | "live" | "stellar_tx";
+export type AvailabilityStatus = "available" | "busy" | "unavailable";
+
+export interface PortfolioItem {
+  title: string;
+  type: PortfolioItemType;
+  url: string;
+}
+
+export interface Availability {
+  status: AvailabilityStatus;
+  availableFrom?: string;
+  availableUntil?: string;
+}
 
 export type FreelancerTier = "Newcomer" | "Rising Star" | "Expert" | "Top Talent";
 
@@ -75,6 +90,8 @@ export interface UserProfile {
   tier?: FreelancerTier;
   /** Number of ratings received (when returned by profile API). */
   ratingCount?: number;
+  didHash?: string;
+  isKycVerified?: boolean;
   createdAt: string;
   updatedAt?: string;
 }

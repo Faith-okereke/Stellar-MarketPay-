@@ -137,9 +137,21 @@ function rowToProfile(row) {
     completedJobs: row.completed_jobs,
     totalEarnedXLM: row.total_earned_xlm,
     rating: row.rating !== null ? parseFloat(row.rating) : null,
+    didHash: row.did_hash,
+    isKycVerified: row.is_kyc_verified,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function calculateFreelancerTier(completedJobs = 0, rating = null) {
+  const jobs = Number(completedJobs) || 0;
+  const safeRating = rating === null || rating === undefined ? null : Number(rating);
+
+  if (jobs >= 30 && safeRating !== null && safeRating >= 4.8) return "Top Talent";
+  if (jobs >= 15 && safeRating !== null && safeRating >= 4.5) return "Expert";
+  if (jobs >= 5) return "Rising Star";
+  return "Newcomer";
 }
 
 async function getProfile(publicKey) {
@@ -176,6 +188,7 @@ async function getProfile(publicKey) {
   const profile = rowToProfile(rows[0]);
   profile.rating = rows[0].avg_rating !== null ? parseFloat(rows[0].avg_rating) : null;
   profile.ratingCount = rows[0].rating_count;
+  profile.tier = calculateFreelancerTier(profile.completedJobs, profile.rating);
   
   // Calculate reputation score (simple formula: higher weight on ratings, lower on time)
   // Max score 100.
@@ -256,10 +269,37 @@ async function updateAvailability(publicKey, availability) {
   return rowToProfile(rows[0]);
 }
 
+async function verifyIdentity(publicKey, didHash) {
+  validatePublicKey(publicKey);
+  if (!didHash) throw createValidationError("didHash is required");
+
+  const { rows } = await pool.query(
+    `
+    UPDATE profiles
+    SET did_hash = $2,
+        is_kyc_verified = TRUE,
+        updated_at = NOW()
+    WHERE public_key = $1
+    RETURNING *
+    `,
+    [publicKey, didHash]
+  );
+
+  if (!rows.length) {
+    const e = new Error("Profile not found");
+    e.status = 404;
+    throw e;
+  }
+
+  return rowToProfile(rows[0]);
+}
+
 module.exports = {
   getProfile,
   upsertProfile,
   updateAvailability,
+  verifyIdentity,
+  calculateFreelancerTier,
   VALID_PORTFOLIO_TYPES,
   VALID_AVAILABILITY_STATUSES,
   MAX_PORTFOLIO_ITEMS,

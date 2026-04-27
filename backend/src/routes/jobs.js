@@ -51,21 +51,21 @@ router.get("/", generalJobRateLimiter, async (req, res, next) => {
 });
 
 // GET /api/jobs/client/:publicKey — list jobs posted by a client
-router.get("/client/:publicKey", generalJobRateLimiter, (req, res, next) => {
-  try { res.json({ success: true, data: listJobsByClient(req.params.publicKey) }); }
+router.get("/client/:publicKey", generalJobRateLimiter, async (req, res, next) => {
+  try { res.json({ success: true, data: await listJobsByClient(req.params.publicKey) }); }
   catch (e) { next(e); }
 });
 
 // GET /api/jobs/:id — get single job
-router.get("/:id", generalJobRateLimiter ,(req, res, next) => {
-  try { res.json({ success: true, data: getJob(req.params.id) }); }
+router.get("/:id", generalJobRateLimiter, async (req, res, next) => {
+  try { res.json({ success: true, data: await getJob(req.params.id) }); }
   catch (e) { next(e); }
 });
 
 // POST /api/jobs — create a new job
-router.post("/", jobCreationRateLimiter ,(req, res, next) => {
+router.post("/", jobCreationRateLimiter, async (req, res, next) => {
   try {
-    const job = createJob(req.body);
+    const job = await createJob(req.body);
     res.status(201).json({ success: true, data: job });
   } catch (e) { next(e); }
 });
@@ -109,6 +109,27 @@ router.delete("/:id", verifyJWT, generalJobRateLimiter, async (req, res, next) =
   try {
     await deleteJob(req.params.id);
     res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+// POST /api/jobs/:id/score-proposals — score all applications using AI
+router.post("/:id/score-proposals", verifyJWT, async (req, res, next) => {
+  try {
+    const { scoreProposals } = require("../services/aiService");
+    const { getApplicationsForJob } = require("../services/applicationService");
+    
+    const job = await getJob(req.params.id);
+    if (!job) return res.status(404).json({ success: false, error: "Job not found" });
+
+    // Verify ownership
+    if (job.clientAddress !== req.user.publicKey) {
+      return res.status(403).json({ success: false, error: "Only the job client can score proposals" });
+    }
+
+    const applications = await getApplicationsForJob(req.params.id);
+    const scores = await scoreProposals(job, applications);
+
+    res.json({ success: true, data: scores });
   } catch (e) { next(e); }
 });
 

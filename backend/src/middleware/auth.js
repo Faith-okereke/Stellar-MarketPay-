@@ -17,7 +17,7 @@ function verifyJWT(req, res, next) {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded; // { publicKey: "..." }
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
   }
 }

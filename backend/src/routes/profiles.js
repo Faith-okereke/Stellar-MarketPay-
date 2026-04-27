@@ -31,4 +31,15 @@ router.post("/:publicKey/availability", profileUpdateRateLimiter, async (req, re
   catch (e) { next(e); }
 });
 
+router.post("/:publicKey/verify", profileUpdateRateLimiter, async (req, res, next) => {
+  try {
+    const { verifyIdentity } = require("../services/profileService");
+    res.json({
+      success: true,
+      data: await verifyIdentity(req.params.publicKey, req.body.didHash),
+    });
+  }
+  catch (e) { next(e); }
+});
+
 module.exports = router;

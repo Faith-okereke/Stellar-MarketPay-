@@ -24,6 +24,10 @@ ALTER TABLE profiles
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS availability JSONB;
 
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS did_hash TEXT,
+  ADD COLUMN IF NOT EXISTS is_kyc_verified BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- ─────────────────────────────────────────
 -- jobs
 -- ─────────────────────────────────────────
@@ -51,6 +55,14 @@ CREATE INDEX IF NOT EXISTS jobs_category_idx        ON jobs(category);
 CREATE INDEX IF NOT EXISTS jobs_client_address_idx  ON jobs(client_address);
 CREATE INDEX IF NOT EXISTS jobs_created_at_idx      ON jobs(created_at DESC);
 
+ALTER TABLE jobs
+  ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XLM',
+  ADD COLUMN IF NOT EXISTS share_count INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS boosted BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS boosted_until TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS timezone TEXT,
+  ADD COLUMN IF NOT EXISTS screening_questions TEXT[] NOT NULL DEFAULT '{}';
+
 -- ─────────────────────────────────────────
 -- applications
 -- ─────────────────────────────────────────
@@ -68,6 +80,10 @@ CREATE TABLE IF NOT EXISTS applications (
 
 CREATE INDEX IF NOT EXISTS applications_job_id_idx             ON applications(job_id);
 CREATE INDEX IF NOT EXISTS applications_freelancer_address_idx ON applications(freelancer_address);
+
+ALTER TABLE applications
+  ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XLM',
+  ADD COLUMN IF NOT EXISTS screening_answers JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- ─────────────────────────────────────────
 -- escrows  (schema only; populated by smart-contract layer)

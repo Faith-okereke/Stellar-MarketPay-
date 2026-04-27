@@ -12,26 +12,23 @@ import FreelancerTierBadge from "@/components/FreelancerTierBadge";
 import WalletConnect from "@/components/WalletConnect";
 import RatingForm from "@/components/RatingForm";
 import ShareJobModal from "@/components/ShareJobModal";
-import ProposalComparison from "@/components/ProposalComparison";
-import { fetchJob, fetchApplications, acceptApplication, releaseEscrow, fetchProfile } from "@/lib/api";
-import {
-  formatXLM,
-  timeAgo,
-  formatDate,
-  shortenAddress,
-  statusLabel,
-  statusClass,
-  availabilityStatusLabel,
-  availabilitySummary,
-} from "@/utils/format";
+import { fetchJob, fetchApplications, acceptApplication, releaseEscrow, scoreProposals } from "@/lib/api";
+import { formatXLM, timeAgo, formatDate, shortenAddress, statusLabel, statusClass } from "@/utils/format";
 import {
   accountUrl,
   buildReleaseEscrowTransaction,
+  buildReleaseWithConversionTransaction,
   explorerUrl,
+  getPathPaymentPrice,
   submitSignedSorobanTransaction,
+  USDC_ISSUER,
+  USDC_SAC_ADDRESS,
+  XLM_SAC_ADDRESS,
 } from "@/lib/stellar";
+import { Asset } from "@stellar/stellar-sdk";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import type { Application, AvailabilityStatus, Job, UserProfile } from "@/utils/types";
+import clsx from "clsx";
 
 interface JobDetailProps {
   publicKey: string | null;
@@ -62,12 +59,47 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [prefillData, setPrefillData] = useState<any>(null);
-  const [showComparison, setShowComparison] = useState(false);
-  const [selectedApplications, setSelectedApplications] = useState<Set<string>>(new Set());
+  const [aiScores, setAiScores] = useState<Record<string, { score: number; reasoning: string }>>({});
+  const [scoringProposals, setScoringProposals] = useState(false);
+
+  const [releaseCurrency, setReleaseCurrency] = useState<"XLM" | "USDC">("XLM");
+  const [estimatedOutput, setEstimatedOutput] = useState<string | null>(null);
+  const [fetchingPrice, setFetchingPrice] = useState(false);
 
   const isClient = publicKey && job?.clientAddress === publicKey;
   const isFreelancer = publicKey && job?.freelancerAddress === publicKey;
   const hasApplied = applications.some((application) => application.freelancerAddress === publicKey);
+
+  useEffect(() => {
+    if (job?.currency) setReleaseCurrency(job.currency as any);
+  }, [job?.currency]);
+
+  useEffect(() => {
+    if (!job || !releaseCurrency || releaseCurrency === job.currency) {
+      setEstimatedOutput(null);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchPrice = async () => {
+      setFetchingPrice(true);
+      try {
+        const sourceAsset = job.currency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
+        const destAsset = releaseCurrency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
+        const res = await getPathPaymentPrice(sourceAsset, job.budget, destAsset);
+        if (!cancelled && res) {
+          setEstimatedOutput(res.amount);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!cancelled) setFetchingPrice(false);
+      }
+    };
+
+    fetchPrice();
+    return () => { cancelled = true; };
+  }, [releaseCurrency, job?.budget, job?.currency]);
 
   useEffect(() => {
     if (!id) return;
@@ -158,6 +190,23 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
   const selectedApps = applications.filter((app) => selectedApplications.has(app.id));
 
+  const handleScoreProposals = async () => {
+    if (!id) return;
+    setScoringProposals(true);
+    try {
+      const scores = await scoreProposals(id as string);
+      const scoreMap = scores.reduce((accumulator, current) => {
+        accumulator[current.id] = { score: current.score, reasoning: current.reasoning };
+        return accumulator;
+      }, {} as Record<string, { score: number; reasoning: string }>);
+      setAiScores(scoreMap);
+    } catch (error) {
+      console.error("Scoring error:", error);
+    } finally {
+      setScoringProposals(false);
+    }
+  };
+
   const handleReleaseEscrow = async () => {
     if (!publicKey || !job) return;
     if (!job.escrowContractId) {
@@ -173,7 +222,24 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     setReleaseSyncedWithBackend(false);
 
     try {
-      const prepared = await buildReleaseEscrowTransaction(job.escrowContractId, job.id, publicKey);
+      let prepared;
+      if (releaseCurrency !== job.currency && estimatedOutput) {
+        // Issue #104: Release with conversion
+        const targetTokenAddress = releaseCurrency === "XLM" ? XLM_SAC_ADDRESS : USDC_SAC_ADDRESS;
+        // Apply 1% slippage protection (destMin = estimatedOutput * 0.99)
+        const minAmountOut = BigInt(Math.round(parseFloat(estimatedOutput) * 0.99 * (releaseCurrency === "XLM" ? 10_000_000 : 1_000_000)));
+        
+        prepared = await buildReleaseWithConversionTransaction(
+          job.escrowContractId,
+          job.id,
+          publicKey,
+          targetTokenAddress,
+          minAmountOut
+        );
+      } else {
+        prepared = await buildReleaseEscrowTransaction(job.escrowContractId, job.id, publicKey);
+      }
+
       const { signedXDR, error: signError } = await signTransactionWithWallet(prepared.toXDR());
       if (signError || !signedXDR) {
         setActionError(signError || "Signing was cancelled.");
@@ -316,9 +382,40 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
             <h2 className="font-display text-xl font-bold text-amber-100">
               Applications ({applications.length})
             </h2>
-            <div className="hidden sm:flex items-center gap-3 text-[10px] text-amber-800 font-medium uppercase tracking-wider">
-              <span className="flex items-center gap-1"><kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">↑↓</kbd> Navigate</span>
-              <span className="flex items-center gap-1"><kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">Enter</kbd> Accept</span>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleScoreProposals}
+                disabled={scoringProposals || applications.length === 0}
+                className="btn-secondary text-[10px] py-1 px-3 flex items-center gap-1.5"
+              >
+                {scoringProposals ? (
+                  <Spinner />
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                    />
+                  </svg>
+                )}
+                Score proposals (AI)
+              </button>
+              <div className="hidden sm:flex items-center gap-3 text-[10px] text-amber-800 font-medium uppercase tracking-wider">
+                <span className="flex items-center gap-1">
+                  <kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">
+                    ↑↓
+                  </kbd>{" "}
+                  Navigate
+                </span>
+                <span className="flex items-center gap-1">
+                  <kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">
+                    Enter
+                  </kbd>{" "}
+                  Accept
+                </span>
+              </div>
             </div>
           </div>
           <div className="space-y-4">
@@ -342,32 +439,46 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
                       if (app.status === "pending" && job.status === "open") {
                         handleAcceptApplication(app.id);
                       }
-                    }
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-4 mb-3">
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedApplications.has(app.id)}
-                        onChange={() => handleToggleSelection(app.id)}
-                        disabled={
-                          !selectedApplications.has(app.id) && selectedApplications.size >= 3
-                        }
-                        className="w-4 h-4 rounded border-market-500/30 bg-market-500/10 text-market-400 focus:ring-market-500/50 cursor-pointer"
-                      />
-                      <div>
-                        <a href={accountUrl(app.freelancerAddress)} target="_blank" rel="noopener noreferrer"
-                          className="address-tag hover:border-market-500/40 transition-colors">
-                          {shortenAddress(app.freelancerAddress)} ↗
-                        </a>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className={clsx("text-[10px] px-2 py-0.5 rounded-full border", getAvailabilityBadgeClass(availability?.status))}>
-                            {availabilityStatusLabel(availability?.status)}
-                          </span>
-                          {availabilitySummary(availability) && (
-                            <span className="text-[10px] text-amber-800">{availabilitySummary(availability)}</span>
-                          )}
+                      className="w-4 h-4 rounded border-market-500/30 bg-market-500/10 text-market-400 focus:ring-market-500/50 cursor-pointer"
+                    />
+                    <a href={accountUrl(app.freelancerAddress)} target="_blank" rel="noopener noreferrer"
+                      className="address-tag hover:border-market-500/40 transition-colors">
+                      {shortenAddress(app.freelancerAddress)} ↗
+                    </a>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-market-400 font-semibold text-sm">{formatXLM(app.bidAmount)}</span>
+                    <span className={clsx("text-xs px-2.5 py-1 rounded-full border",
+                      app.status === "accepted" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                      app.status === "rejected" ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                      "bg-market-500/10 text-market-400 border-market-500/20"
+                    )}>{app.status}</span>
+                  </div>
+                </div>
+
+                {aiScores[app.id] && (
+                  <div className="mb-4 p-3 rounded bg-market-500/5 border border-market-500/15 animate-fade-in">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-market-400 bg-market-500/10 px-1.5 py-0.5 rounded">AI Score</span>
+                      <span className="text-lg font-display font-bold text-amber-100">{aiScores[app.id].score}/10</span>
+                    </div>
+                    <p className="text-xs text-amber-700/90 leading-relaxed italic">
+                      &quot;{aiScores[app.id].reasoning}&quot;
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-amber-700/80 text-sm leading-relaxed mb-4">{app.proposal}</p>
+                
+                {/* Screening Answers */}
+                {app.screeningAnswers && Object.keys(app.screeningAnswers).length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-market-500/10">
+                    <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">Screening Question Answers</h4>
+                    <div className="space-y-3">
+                      {Object.entries(app.screeningAnswers).map(([question, answer], index) => (
+                        <div key={index}>
+                          <p className="text-xs text-amber-300 font-medium mb-1">{question}</p>
+                          <p className="text-sm text-amber-700/80 bg-market-500/5 p-2 rounded border border-market-500/10">{answer}</p>
                         </div>
                       </div>
                     </div>
@@ -445,6 +556,146 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               <button onClick={() => setShowApplyForm(true)} className="btn-primary text-base px-10 py-3.5">
                 Apply for this Job
               </button>
+            )}
+
+        {isClient && job.status === "in_progress" && (
+          <div className="card mb-6 border-market-500/30">
+            <h2 className="font-display text-xl font-bold text-amber-100 mb-4">Escrow Management</h2>
+            <p className="text-amber-800 text-sm mb-6">
+              The work is in progress. Once you are satisfied with the deliverables, you can release the funds to the freelancer.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">
+                  Release Asset
+                </label>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setReleaseCurrency(job.currency as any)}
+                    className={clsx(
+                      "flex-1 py-2 px-4 rounded border transition-all",
+                      releaseCurrency === job.currency
+                        ? "bg-market-500/20 border-market-400 text-market-400"
+                        : "bg-ink-900 border-market-500/10 text-amber-800 hover:border-market-500/30"
+                    )}
+                  >
+                    {job.currency} (Default)
+                  </button>
+                  <button
+                    onClick={() => setReleaseCurrency(job.currency === "USDC" ? "XLM" : "USDC")}
+                    className={clsx(
+                      "flex-1 py-2 px-4 rounded border transition-all",
+                      releaseCurrency !== job.currency
+                        ? "bg-market-500/20 border-market-400 text-market-400"
+                        : "bg-ink-900 border-market-500/10 text-amber-800 hover:border-market-500/30"
+                    )}
+                  >
+                    {job.currency === "USDC" ? "XLM" : "USDC"}
+                  </button>
+                </div>
+              </div>
+
+              {releaseCurrency !== job.currency && (
+                <div className="bg-market-500/5 p-4 rounded border border-market-500/10 animate-fade-in">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs text-amber-800">Estimated Output</span>
+                    {fetchingPrice ? (
+                      <Spinner />
+                    ) : (
+                      <span className="font-mono text-market-400">
+                        {estimatedOutput} {releaseCurrency}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-amber-900">
+                    Conversion via Stellar DEX path payment. Rate is estimated and subject to slippage.
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={handleReleaseEscrow}
+                disabled={releasingEscrow || (releaseCurrency !== job.currency && !estimatedOutput)}
+                className="btn-primary w-full py-3 flex items-center justify-center gap-2"
+              >
+                {releasingEscrow ? <Spinner /> : "Release Escrow"}
+              </button>
+              
+              {actionError && <p className="mt-3 text-red-400 text-sm">{actionError}</p>}
+            </div>
+          </div>
+        )}
+
+        {isClient && applications.length > 0 && (
+          <div className="mb-6">
+            <h2 className="font-display text-xl font-bold text-amber-100 mb-4">
+              Applications ({applications.length})
+            </h2>
+            <div className="space-y-4">
+              {applications.map((application) => {
+                const applicantProfile = applicantProfiles[application.freelancerAddress];
+                const availability = applicantProfile?.availability;
+
+                return (
+                  <div key={application.id} className="card">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div>
+                        <a
+                          href={accountUrl(application.freelancerAddress)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="address-tag hover:border-market-500/40 transition-colors"
+                        >
+                          {shortenAddress(application.freelancerAddress)} ↗
+                        </a>
+                        <div className="mt-3">
+                          <span
+                            className={clsx(
+                              "text-xs px-2.5 py-1 rounded-full border",
+                              getAvailabilityBadgeClass(availability?.status)
+                            )}
+                          >
+                            {availabilityStatusLabel(availability?.status)}
+                          </span>
+                          <p className="text-xs text-amber-800 mt-2">
+                            {availabilitySummary(availability) || "Availability has not been set yet."}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono text-market-400 font-semibold text-sm">
+                          {formatXLM(application.bidAmount)}
+                        </span>
+                        <span
+                          className={clsx(
+                            "text-xs px-2.5 py-1 rounded-full border",
+                            application.status === "accepted"
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              : application.status === "rejected"
+                                ? "bg-red-500/10 text-red-400 border-red-500/20"
+                                : "bg-market-500/10 text-market-400 border-market-500/20"
+                          )}
+                        >
+                          {application.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-amber-700/80 text-sm leading-relaxed mb-4">{application.proposal}</p>
+
+                    {application.status === "pending" && job.status === "open" && (
+                      <button
+                        onClick={() => handleAcceptApplication(application.id)}
+                        className="btn-secondary text-sm py-2 px-4"
+                      >
+                        Accept Proposal
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
           {actionError && <p className="mt-3 text-red-400 text-sm">{actionError}</p>}
@@ -470,6 +721,185 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               onSuccess={() => setRatingSubmitted(true)}
             />
           )}
+        </div>
+      )}
+
+      {/* Invoice generation (for completed jobs) - Issue #83 */}
+      {job.status === "completed" && isFreelancer && (
+        <div className="mt-6 card">
+          <h3 className="font-display text-lg font-bold text-amber-100 mb-4">Invoice</h3>
+          <p className="text-amber-800 text-sm mb-4">
+            Generate a professional PDF invoice for your accounting records.
+          </p>
+          <button
+            onClick={() => {
+              // Generate invoice
+              const invoiceNumber = `INV-${job.id.substring(0, 8).toUpperCase()}-${Date.now()}`;
+              const invoiceHTML = `
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Invoice</title>
+                  <style>
+                    body {
+                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                      padding: 40px;
+                      background: #f5f5f5;
+                    }
+                    .invoice-container {
+                      background: white;
+                      padding: 40px;
+                      max-width: 800px;
+                      margin: 0 auto;
+                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    }
+                    .invoice-header {
+                      display: flex;
+                      justify-content: space-between;
+                      margin-bottom: 40px;
+                      border-bottom: 2px solid #e0e0e0;
+                      padding-bottom: 20px;
+                    }
+                    .invoice-title {
+                      font-size: 32px;
+                      font-weight: bold;
+                      color: #333;
+                    }
+                    .invoice-number {
+                      text-align: right;
+                      color: #666;
+                    }
+                    .invoice-number div {
+                      margin: 5px 0;
+                    }
+                    .section {
+                      margin-bottom: 30px;
+                    }
+                    .section-title {
+                      font-weight: bold;
+                      color: #333;
+                      margin-bottom: 10px;
+                    }
+                    .section-content {
+                      color: #666;
+                      line-height: 1.6;
+                    }
+                    .job-details {
+                      background: #f9f9f9;
+                      padding: 20px;
+                      border-radius: 4px;
+                      margin-bottom: 30px;
+                    }
+                    .detail-row {
+                      display: flex;
+                      justify-content: space-between;
+                      margin: 10px 0;
+                      color: #333;
+                    }
+                    .detail-label {
+                      font-weight: 500;
+                    }
+                    .amount-row {
+                      display: flex;
+                      justify-content: space-between;
+                      font-size: 18px;
+                      font-weight: bold;
+                      border-top: 2px solid #e0e0e0;
+                      padding-top: 15px;
+                      margin-top: 15px;
+                      color: #333;
+                    }
+                    .footer {
+                      margin-top: 40px;
+                      padding-top: 20px;
+                      border-top: 1px solid #e0e0e0;
+                      font-size: 12px;
+                      color: #999;
+                      text-align: center;
+                    }
+                    @media print {
+                      body { background: white; padding: 0; }
+                      .invoice-container { box-shadow: none; }
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div class="invoice-container">
+                    <div class="invoice-header">
+                      <div class="invoice-title">INVOICE</div>
+                      <div class="invoice-number">
+                        <div><strong>${invoiceNumber}</strong></div>
+                        <div>Date: ${formatDate(new Date())}</div>
+                        <div>Job ID: ${job.id}</div>
+                      </div>
+                    </div>
+
+                    <div class="section">
+                      <div class="section-title">Bill To (Client)</div>
+                      <div class="section-content">
+                        <div>${job.clientAddress}</div>
+                        <div style="margin-top: 10px; font-size: 12px; color: #999;">
+                          Network: Stellar Testnet
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="section">
+                      <div class="section-title">From (Freelancer)</div>
+                      <div class="section-content">
+                        <div>${publicKey}</div>
+                        <div style="margin-top: 10px; font-size: 12px; color: #999;">
+                          Network: Stellar Testnet
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="job-details">
+                      <div class="detail-row">
+                        <span class="detail-label">Job Title:</span>
+                        <span>${job.title}</span>
+                      </div>
+                      <div class="detail-row">
+                        <span class="detail-label">Description:</span>
+                        <span>${job.description?.substring(0, 50)}...</span>
+                      </div>
+                      <div class="detail-row">
+                        <span class="detail-label">Amount:</span>
+                        <span>${formatXLM(job.budgetAmount || 0)}</span>
+                      </div>
+                      <div class="detail-row">
+                        <span class="detail-label">Completion Date:</span>
+                        <span>${formatDate(new Date())}</span>
+                      </div>
+                      <div class="amount-row">
+                        <span>Total Due:</span>
+                        <span>${formatXLM(job.budgetAmount || 0)}</span>
+                      </div>
+                    </div>
+
+                    <div class="footer">
+                      <p>This is an automated invoice generated by Stellar MarketPay</p>
+                      <p>For support, visit https://stellar-marketpay.app</p>
+                    </div>
+                  </div>
+                </body>
+                </html>
+              `;
+
+              // Open print dialog
+              const printWindow = window.open('', '', 'height=600,width=800');
+              if (printWindow) {
+                printWindow.document.write(invoiceHTML);
+                printWindow.document.close();
+                printWindow.print();
+              }
+            }}
+            className="btn-primary py-2 px-4 text-sm"
+          >
+            Generate Invoice & Print
+          </button>
         </div>
       )}
     </div>

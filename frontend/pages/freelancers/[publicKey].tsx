@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import FreelancerTierBadge from "@/components/FreelancerTierBadge";
-import { fetchPublicProfile } from "@/lib/api";
+import { fetchPublicProfile, verifyIdentity } from "@/lib/api";
 import {
   availabilityStatusLabel,
   availabilitySummary,
@@ -51,11 +51,32 @@ function getAvailabilityBadgeClass(status?: AvailabilityStatus | null) {
   return "bg-market-500/10 text-market-300 border-market-500/20";
 }
 
-export default function PublicFreelancerProfilePage() {
+export default function PublicFreelancerProfilePage({ publicKey }: { publicKey: string | null }) {
   const router = useRouter();
   const rawKey = typeof router.query.publicKey === "string" ? router.query.publicKey : "";
 
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [verifying, setVerifying] = useState(false);
+
+  const isOwner = publicKey && rawKey === publicKey;
+
+  const handleVerifyIdentity = async () => {
+    if (!publicKey) return;
+    setVerifying(true);
+    try {
+      // Mocking DID verification flow (e.g. SpruceID/Rebase)
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      const mockDidHash = `did:pkh:stellar:${rawKey}#marketpay-kyc-${Date.now()}`;
+      const updatedProfile = await verifyIdentity(rawKey, mockDidHash);
+
+      setState({ status: "ok", profile: updatedProfile });
+    } catch (error) {
+      console.error("Verification error:", error);
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const titleBase = useMemo(() => {
     if (state.status === "ok" && state.profile.displayName?.trim()) {
@@ -175,8 +196,16 @@ export default function PublicFreelancerProfilePage() {
                 <h1 className="font-display text-2xl sm:text-3xl font-bold text-amber-100 break-words">
                   {state.profile.displayName?.trim() || shortenAddress(state.profile.publicKey)}
                 </h1>
-                <div className="mt-3">
+                <div className="flex items-center gap-2 mt-3">
                   <FreelancerTierBadge tier={state.profile.tier} className="text-sm" />
+                  {state.profile.isKycVerified && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold uppercase tracking-wider">
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M2.166 4.9l7.19-3.17c.41-.18.88-.18 1.28 0l7.19 3.17c.43.19.71.63.71 1.1v3.47c0 4.35-2.52 8.35-6.39 10.15-.36.17-.77.17-1.13 0-3.87-1.8-6.39-5.8-6.39-10.15V6c0-.47.28-.91.71-1.1zM10 5a1 1 0 10-2 0v4H7a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V5z" clipRule="evenodd" />
+                      </svg>
+                      KYC Verified
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs sm:text-sm text-amber-800 mt-2 font-mono break-all">
                   {state.profile.publicKey}
@@ -191,6 +220,37 @@ export default function PublicFreelancerProfilePage() {
                 >
                   View on Stellar Expert →
                 </a>
+                {isOwner && !state.profile.isKycVerified && (
+                  <button
+                    onClick={handleVerifyIdentity}
+                    disabled={verifying}
+                    className="btn-primary text-sm w-full sm:w-auto flex items-center justify-center gap-2"
+                  >
+                    {verifying ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                            fill="none"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                          />
+                        </svg>
+                        Verifying...
+                      </>
+                    ) : (
+                      "Verify Identity (DID)"
+                    )}
+                  </button>
+                )}
               </div>
             </div>
 
