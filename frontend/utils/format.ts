@@ -117,6 +117,26 @@ export function statusClass(status: JobStatus): string {
   return { open: "badge-open", in_progress: "badge-progress", completed: "badge-complete", cancelled: "badge-cancelled" }[status];
 }
 
+export function availabilityStatusLabel(status?: Availability["status"] | null): string {
+  if (status === "available") return "Available";
+  if (status === "busy") return "Busy";
+  if (status === "unavailable") return "Unavailable";
+  return "Not set";
+}
+
+export function availabilitySummary(availability?: Availability | null): string {
+  if (!availability || !availability.status) return "";
+
+  const label = availabilityStatusLabel(availability.status);
+  const from = availability.availableFrom ? formatDeadline(availability.availableFrom) : "";
+  const until = availability.availableUntil ? formatDeadline(availability.availableUntil) : "";
+
+  if (from && until) return `${label} from ${from} to ${until}`;
+  if (from) return `${label} from ${from}`;
+  if (until) return `${label} until ${until}`;
+  return label;
+}
+
 export const JOB_CATEGORIES = [
   "Smart Contracts", "Frontend Development", "Backend Development",
   "UI/UX Design", "Technical Writing", "DevOps", "Security Audit",

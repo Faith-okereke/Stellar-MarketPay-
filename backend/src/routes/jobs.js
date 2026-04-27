@@ -51,21 +51,21 @@ router.get("/", generalJobRateLimiter, async (req, res, next) => {
 });
 
 // GET /api/jobs/client/:publicKey — list jobs posted by a client
-router.get("/client/:publicKey", generalJobRateLimiter, (req, res, next) => {
-  try { res.json({ success: true, data: listJobsByClient(req.params.publicKey) }); }
+router.get("/client/:publicKey", generalJobRateLimiter, async (req, res, next) => {
+  try { res.json({ success: true, data: await listJobsByClient(req.params.publicKey) }); }
   catch (e) { next(e); }
 });
 
 // GET /api/jobs/:id — get single job
-router.get("/:id", generalJobRateLimiter ,(req, res, next) => {
-  try { res.json({ success: true, data: getJob(req.params.id) }); }
+router.get("/:id", generalJobRateLimiter, async (req, res, next) => {
+  try { res.json({ success: true, data: await getJob(req.params.id) }); }
   catch (e) { next(e); }
 });
 
 // POST /api/jobs — create a new job
-router.post("/", jobCreationRateLimiter ,(req, res, next) => {
+router.post("/", jobCreationRateLimiter, async (req, res, next) => {
   try {
-    const job = createJob(req.body);
+    const job = await createJob(req.body);
     res.status(201).json({ success: true, data: job });
   } catch (e) { next(e); }
 });
