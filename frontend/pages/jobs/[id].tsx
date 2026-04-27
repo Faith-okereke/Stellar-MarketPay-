@@ -11,8 +11,10 @@ import FreelancerTierBadge from "@/components/FreelancerTierBadge";
 import WalletConnect from "@/components/WalletConnect";
 import RatingForm from "@/components/RatingForm";
 import ShareJobModal from "@/components/ShareJobModal";
-import { fetchJob, fetchApplications, acceptApplication, releaseEscrow, scoreProposals } from "@/lib/api";
-import { formatXLM, timeAgo, formatDate, shortenAddress, statusLabel, statusClass } from "@/utils/format";
+import ProposalComparison from "@/components/ProposalComparison";
+import clsx from "clsx";
+import { fetchJob, fetchApplications, acceptApplication, releaseEscrow, fetchProfile } from "@/lib/api";
+import { formatXLM, timeAgo, formatDate, shortenAddress, statusLabel, statusClass, availabilityStatusLabel, availabilitySummary } from "@/utils/format";
 import {
   accountUrl,
   buildReleaseEscrowTransaction,
@@ -58,12 +60,18 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [prefillData, setPrefillData] = useState<any>(null);
-  const [aiScores, setAiScores] = useState<Record<string, { score: number; reasoning: string }>>({});
-  const [scoringProposals, setScoringProposals] = useState(false);
+  const [expandedProposals, setExpandedProposals] = useState<Set<string>>(new Set());
+  const [selectedApplications, setSelectedApplications] = useState<Set<string>>(new Set());
+  const [showComparison, setShowComparison] = useState(false);
 
-  const [releaseCurrency, setReleaseCurrency] = useState<"XLM" | "USDC">("XLM");
-  const [estimatedOutput, setEstimatedOutput] = useState<string | null>(null);
-  const [fetchingPrice, setFetchingPrice] = useState(false);
+  const toggleProposalExpand = (appId: string) => {
+    setExpandedProposals((prev) => {
+      const next = new Set(prev);
+      if (next.has(appId)) next.delete(appId);
+      else next.add(appId);
+      return next;
+    });
+  };
 
   const isClient = publicKey && job?.clientAddress === publicKey;
   const isFreelancer = publicKey && job?.freelancerAddress === publicKey;
@@ -102,8 +110,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
   useEffect(() => {
     if (!id) return;
-    
-    // Check for prefill parameter
+
     const { prefill } = router.query;
     if (typeof prefill === 'string') {
       try {
@@ -113,7 +120,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
         // Invalid prefill data, ignore
       }
     }
-    
+
     Promise.all([
       fetchJob(id as string),
       fetchApplications(id as string),
@@ -162,7 +169,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     if (!publicKey) return;
 
     try {
-      await acceptApplication(appId, publicKey);
+      await acceptApplication(applicationId, publicKey);
       const [j, apps] = await Promise.all([fetchJob(id as string), fetchApplications(id as string)]);
       setJob(j); setApplications(apps);
       setSelectedApplications(new Set());
@@ -288,7 +295,6 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
   return (
     <>
-      {/* Open Graph Meta Tags */}
       <Head>
         <title>{job.title} - Stellar MarketPay</title>
         <meta name="description" content={job.description.substring(0, 160)} />
@@ -305,39 +311,9 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
 
-        {/* Back */}
         <Link href="/jobs" className="inline-flex items-center gap-1.5 text-sm text-amber-800 hover:text-amber-400 transition-colors mb-6">
           ← Back to Jobs
         </Link>
-
-        {/* Job header */}
-        <div className="card mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-5">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <span className={statusClass(job.status)}>{statusLabel(job.status)}</span>
-                <span className="text-xs text-amber-800 bg-ink-700 px-2.5 py-1 rounded-full border border-market-500/10">{job.category}</span>
-                {job.boosted && new Date(job.boostedUntil || '') > new Date() && (
-                  <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">Featured</span>
-                )}
-              </div>
-              <h1 className="font-display text-2xl sm:text-3xl font-bold text-amber-100 leading-snug">{job.title}</h1>
-            </div>
-            <div className="flex-shrink-0 text-right">
-              <p className="text-xs text-amber-800 mb-1">Budget</p>
-              <p className="font-mono font-bold text-2xl text-market-400">{formatXLM(job.budget)} {job.currency}</p>
-          {job.deadline && <span>Deadline: {formatDate(job.deadline)}</span>}
-          <a href={accountUrl(job.clientAddress)} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 hover:text-market-400 transition-colors">
-            Client: {shortenAddress(job.clientAddress)} ↗
-          </a>
-        </div>
-
-        {/* Description */}
-        <div className="prose prose-sm max-w-none">
-          <h3 className="font-display text-base font-semibold text-amber-300 mb-3">Description</h3>
-          <p className="text-amber-700/90 leading-relaxed whitespace-pre-wrap font-body text-sm">{job.description}</p>
-        </div>
 
         <div className="card mb-6">
           <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-5">
@@ -400,315 +376,160 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
             </div>
           )}
         </div>
-      )}
-
-      {/* Applications (client view) */}
-      {isClient && applications.length > 0 && (
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-display text-xl font-bold text-amber-100">
-              Applications ({applications.length})
-            </h2>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={handleScoreProposals}
-                disabled={scoringProposals || applications.length === 0}
-                className="btn-secondary text-[10px] py-1 px-3 flex items-center gap-1.5"
-              >
-                {scoringProposals ? (
-                  <Spinner />
-                ) : (
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                    />
-                  </svg>
-                )}
-                Score proposals (AI)
-              </button>
-              <div className="hidden sm:flex items-center gap-3 text-[10px] text-amber-800 font-medium uppercase tracking-wider">
-                <span className="flex items-center gap-1">
-                  <kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">
-                    ↑↓
-                  </kbd>{" "}
-                  Navigate
-                </span>
-                <span className="flex items-center gap-1">
-                  <kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">
-                    Enter
-                  </kbd>{" "}
-                  Accept
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="space-y-4">
-            {applications.map((app) => (
-              <div 
-                key={app.id} 
-                className="card focus-visible:ring-2 focus-visible:ring-market-400 focus:outline-none transition-all"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    (e.currentTarget.nextElementSibling as HTMLElement)?.focus();
-                  } else if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    (e.currentTarget.previousElementSibling as HTMLElement)?.focus();
-                  } else if (e.key === "Enter" && e.target === e.currentTarget) {
-                    if (app.status === "pending" && job.status === "open") {
-                      handleAcceptApplication(app.id);
-                    }
-                  }
-                }}
-              >
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={selectedApplications.has(app.id)}
-                      onChange={() => handleToggleSelection(app.id)}
-                      disabled={
-                        !selectedApplications.has(app.id) && selectedApplications.size >= 3
-                      }
-                      className="w-4 h-4 rounded border-market-500/30 bg-market-500/10 text-market-400 focus:ring-market-500/50 cursor-pointer"
-                    />
-                    <a href={accountUrl(app.freelancerAddress)} target="_blank" rel="noopener noreferrer"
-                      className="address-tag hover:border-market-500/40 transition-colors">
-                      {shortenAddress(app.freelancerAddress)} ↗
-                    </a>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-market-400 font-semibold text-sm">{formatXLM(app.bidAmount)}</span>
-                    <span className={clsx("text-xs px-2.5 py-1 rounded-full border",
-                      app.status === "accepted" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                      app.status === "rejected" ? "bg-red-500/10 text-red-400 border-red-500/20" :
-                      "bg-market-500/10 text-market-400 border-market-500/20"
-                    )}>{app.status}</span>
-                  </div>
-                </div>
-
-                {aiScores[app.id] && (
-                  <div className="mb-4 p-3 rounded bg-market-500/5 border border-market-500/15 animate-fade-in">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-market-400 bg-market-500/10 px-1.5 py-0.5 rounded">AI Score</span>
-                      <span className="text-lg font-display font-bold text-amber-100">{aiScores[app.id].score}/10</span>
-                    </div>
-                    <p className="text-xs text-amber-700/90 leading-relaxed italic">
-                      &quot;{aiScores[app.id].reasoning}&quot;
-                    </p>
-                  </div>
-                )}
-
-                <p className="text-amber-700/80 text-sm leading-relaxed mb-4">{app.proposal}</p>
-                
-                {/* Screening Answers */}
-                {app.screeningAnswers && Object.keys(app.screeningAnswers).length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-market-500/10">
-                    <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">Screening Question Answers</h4>
-                    <div className="space-y-3">
-                      {Object.entries(app.screeningAnswers).map(([question, answer], index) => (
-                        <div key={index}>
-                          <p className="text-xs text-amber-300 font-medium mb-1">{question}</p>
-                          <p className="text-sm text-amber-700/80 bg-market-500/5 p-2 rounded border border-market-500/10">{answer}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                {app.status === "pending" && job.status === "open" && (
-                  <button onClick={() => handleAcceptApplication(app.id)} className="btn-secondary text-sm py-2 px-4 mt-4">
-                    Accept Proposal
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Proposal Comparison Modal */}
-      {showComparison && (
-        <ProposalComparison
-          applications={selectedApps}
-          job={job}
-          publicKey={publicKey}
-          onClose={() => setShowComparison(false)}
-          onAccept={handleAcceptApplication}
-        />
-      )}
-
-      {/* Apply (freelancer view) */}
-      {!isClient && job.status === "open" && (
-        <div className="mb-6">
-          {!publicKey ? (
-            <div>
-              <p className="text-amber-800 text-sm mb-4 text-center">Connect your wallet to apply for this job</p>
-              <WalletConnect onConnect={onConnect} />
-            </div>
-          ) : hasApplied ? (
-            <div className="card text-center py-8 border-market-500/20">
-              <p className="text-market-400 font-medium mb-1">✅ Application submitted</p>
-              <p className="text-amber-800 text-sm">The client will review your proposal shortly.</p>
-            </div>
-          ) : showApplyForm ? (
-            <ApplicationForm
-              job={job}
-              publicKey={publicKey}
-              prefillData={prefillData}
-              onSuccess={() => { setShowApplyForm(false); setApplications((prev) => [...prev, {} as Application]); }}
-            />
-          ) : (
-            <div className="text-center">
-              <button onClick={() => setShowApplyForm(true)} className="btn-primary text-base px-10 py-3.5">
-                Apply for this Job
-              </button>
-            )}
-
-        {isClient && job.status === "in_progress" && (
-          <div className="card mb-6 border-market-500/30">
-            <h2 className="font-display text-xl font-bold text-amber-100 mb-4">Escrow Management</h2>
-            <p className="text-amber-800 text-sm mb-6">
-              The work is in progress. Once you are satisfied with the deliverables, you can release the funds to the freelancer.
-            </p>
-
-            <div className="space-y-6">
-              <div>
-                <label className="block text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">
-                  Release Asset
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setReleaseCurrency(job.currency as any)}
-                    className={clsx(
-                      "flex-1 py-2 px-4 rounded border transition-all",
-                      releaseCurrency === job.currency
-                        ? "bg-market-500/20 border-market-400 text-market-400"
-                        : "bg-ink-900 border-market-500/10 text-amber-800 hover:border-market-500/30"
-                    )}
-                  >
-                    {job.currency} (Default)
-                  </button>
-                  <button
-                    onClick={() => setReleaseCurrency(job.currency === "USDC" ? "XLM" : "USDC")}
-                    className={clsx(
-                      "flex-1 py-2 px-4 rounded border transition-all",
-                      releaseCurrency !== job.currency
-                        ? "bg-market-500/20 border-market-400 text-market-400"
-                        : "bg-ink-900 border-market-500/10 text-amber-800 hover:border-market-500/30"
-                    )}
-                  >
-                    {job.currency === "USDC" ? "XLM" : "USDC"}
-                  </button>
-                </div>
-              </div>
-
-              {releaseCurrency !== job.currency && (
-                <div className="bg-market-500/5 p-4 rounded border border-market-500/10 animate-fade-in">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs text-amber-800">Estimated Output</span>
-                    {fetchingPrice ? (
-                      <Spinner />
-                    ) : (
-                      <span className="font-mono text-market-400">
-                        {estimatedOutput} {releaseCurrency}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-amber-900">
-                    Conversion via Stellar DEX path payment. Rate is estimated and subject to slippage.
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={handleReleaseEscrow}
-                disabled={releasingEscrow || (releaseCurrency !== job.currency && !estimatedOutput)}
-                className="btn-primary w-full py-3 flex items-center justify-center gap-2"
-              >
-                {releasingEscrow ? <Spinner /> : "Release Escrow"}
-              </button>
-              
-              {actionError && <p className="mt-3 text-red-400 text-sm">{actionError}</p>}
-            </div>
-          </div>
-        )}
 
         {isClient && applications.length > 0 && (
           <div className="mb-6">
-            <h2 className="font-display text-xl font-bold text-amber-100 mb-4">
-              Applications ({applications.length})
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-xl font-bold text-amber-100">
+                Applications ({applications.length})
+              </h2>
+              <div className="hidden sm:flex items-center gap-3 text-[10px] text-amber-800 font-medium uppercase tracking-wider">
+                <span className="flex items-center gap-1"><kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">↑↓</kbd> Navigate</span>
+                <span className="flex items-center gap-1"><kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">Enter</kbd> Accept</span>
+              </div>
+            </div>
             <div className="space-y-4">
-              {applications.map((application) => {
-                const applicantProfile = applicantProfiles[application.freelancerAddress];
+              {applications.map((app) => {
+                const applicantProfile = applicantProfiles[app.freelancerAddress];
                 const availability = applicantProfile?.availability;
 
                 return (
-                  <div key={application.id} className="card">
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <div>
-                        <a
-                          href={accountUrl(application.freelancerAddress)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="address-tag hover:border-market-500/40 transition-colors"
-                        >
-                          {shortenAddress(application.freelancerAddress)} ↗
-                        </a>
-                        <div className="mt-3">
-                          <span
-                            className={clsx(
-                              "text-xs px-2.5 py-1 rounded-full border",
-                              getAvailabilityBadgeClass(availability?.status)
-                            )}
+                  <div
+                    key={app.id}
+                    className="card-hover group focus-visible:ring-2 focus-visible:ring-market-400 focus:outline-none"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        (e.currentTarget.nextElementSibling as HTMLElement)?.focus();
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        (e.currentTarget.previousElementSibling as HTMLElement)?.focus();
+                      } else if (e.key === "Enter" && e.target === e.currentTarget) {
+                        if (app.status === "pending" && job.status === "open") {
+                          handleAcceptApplication(app.id);
+                        }
+                      }
+                    }}
+                  >
+                    <div className="flex flex-col sm:flex-row gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedApplications.has(app.id)}
+                            onChange={() => handleToggleSelection(app.id)}
+                            disabled={!selectedApplications.has(app.id) && selectedApplications.size >= 3}
+                            className="w-4 h-4 rounded border-market-500/30 bg-market-500/10 text-market-400 focus:ring-market-500/50 cursor-pointer"
+                          />
+                          <a
+                            href={accountUrl(app.freelancerAddress)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="address-tag hover:border-market-500/40 transition-colors"
                           >
-                            {availabilityStatusLabel(availability?.status)}
-                          </span>
-                          <p className="text-xs text-amber-800 mt-2">
-                            {availabilitySummary(availability) || "Availability has not been set yet."}
-                          </p>
+                            {shortenAddress(app.freelancerAddress)} ↗
+                          </a>
                         </div>
+                        <p className="text-xs text-amber-800 mt-2">
+                          Applied {timeAgo(app.createdAt)}
+                        </p>
+                        {availability && (
+                          <div className="mt-3">
+                            <span
+                              className={clsx(
+                                "text-xs px-2.5 py-1 rounded-full border",
+                                getAvailabilityBadgeClass(availability?.status)
+                              )}
+                            >
+                              {availabilityStatusLabel(availability?.status)}
+                            </span>
+                            <p className="text-xs text-amber-800 mt-2">
+                              {availabilitySummary(availability) || "Availability has not been set yet."}
+                            </p>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0 flex items-center gap-3 sm:flex-col sm:items-end sm:gap-2">
                         <span className="font-mono text-market-400 font-semibold text-sm">
-                          {formatXLM(application.bidAmount)}
+                          {formatXLM(app.bidAmount)}
                         </span>
                         <span
                           className={clsx(
                             "text-xs px-2.5 py-1 rounded-full border",
-                            application.status === "accepted"
+                            app.status === "accepted"
                               ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                              : application.status === "rejected"
+                              : app.status === "rejected"
                                 ? "bg-red-500/10 text-red-400 border-red-500/20"
                                 : "bg-market-500/10 text-market-400 border-market-500/20"
                           )}
                         >
-                          {application.status}
+                          {app.status}
                         </span>
                       </div>
                     </div>
 
-                    <p className="text-amber-700/80 text-sm leading-relaxed mb-4">{application.proposal}</p>
+                    <div className="mt-4 pt-4 border-t border-market-500/10">
+                      <p className="text-amber-700/80 text-sm leading-relaxed">
+                        {expandedProposals.has(app.id)
+                          ? app.proposal
+                          : app.proposal.length > 150
+                            ? `${app.proposal.substring(0, 150)}...`
+                            : app.proposal}
+                      </p>
+                      {app.proposal.length > 150 && (
+                        <button
+                          onClick={() => toggleProposalExpand(app.id)}
+                          className="text-xs text-market-400 hover:text-market-300 mt-2 font-medium transition-colors"
+                        >
+                          {expandedProposals.has(app.id) ? "Show less" : "Read full proposal"}
+                        </button>
+                      )}
+                    </div>
 
-                    {application.status === "pending" && job.status === "open" && (
-                      <button
-                        onClick={() => handleAcceptApplication(application.id)}
-                        className="btn-secondary text-sm py-2 px-4"
-                      >
-                        Accept Proposal
-                      </button>
+                    {app.screeningAnswers && Object.keys(app.screeningAnswers).length > 0 && (
+                      <div className="mt-4 pt-4 border-t border-market-500/10">
+                        <h4 className="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-3">Screening Question Answers</h4>
+                        <div className="space-y-3">
+                          {Object.entries(app.screeningAnswers).map(([question, answer], index) => (
+                            <div key={index}>
+                              <p className="text-xs text-amber-300 font-medium mb-1">{question}</p>
+                              <p className="text-sm text-amber-700/80 bg-market-500/5 p-2 rounded border border-market-500/10">{answer}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {app.status === "pending" && job.status === "open" && (
+                      <div className="flex gap-3 mt-4 pt-4 border-t border-market-500/10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+                        <button
+                          onClick={() => handleAcceptApplication(app.id)}
+                          className="btn-primary text-sm py-2 px-4"
+                        >
+                          Accept
+                        </button>
+                        <button className="btn-ghost text-sm py-2 px-4 text-red-400/70 hover:text-red-400 hover:bg-red-500/8">
+                          Reject
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
               })}
             </div>
           </div>
+        )}
+
+        {showComparison && (
+          <ProposalComparison
+            applications={selectedApps}
+            job={job}
+            publicKey={publicKey}
+            onClose={() => setShowComparison(false)}
+            onAccept={handleAcceptApplication}
+          />
         )}
 
         {!isClient && job.status === "open" && (
@@ -742,9 +563,32 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
                 </button>
               </div>
             )}
+
+            {actionError && <p className="mt-3 text-red-400 text-sm">{actionError}</p>}
           </div>
         )}
 
+        {job.status === "completed" && publicKey && !ratingSubmitted && (
+          <div className="mt-6">
+            {isClient && job.freelancerAddress && (
+              <RatingForm
+                jobId={job.id}
+                ratedAddress={job.freelancerAddress}
+                ratedLabel="the freelancer"
+                onSuccess={() => setRatingSubmitted(true)}
+              />
+            )}
+            {isFreelancer && (
+              <RatingForm
+                jobId={job.id}
+                ratedAddress={job.clientAddress}
+                ratedLabel="the client"
+                onSuccess={() => setRatingSubmitted(true)}
+              />
+            )}
+          </div>
+        )}
+      </div>
       {/* Rating section (job completed) */}
       {job.status === "completed" && publicKey && !ratingSubmitted && (
         <div className="mt-6">
@@ -874,7 +718,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
                       <div class="invoice-title">INVOICE</div>
                       <div class="invoice-number">
                         <div><strong>${invoiceNumber}</strong></div>
-                        <div>Date: ${formatDate(new Date())}</div>
+                        <div>Date: ${formatDate(new Date().toISOString())}</div>
                         <div>Job ID: ${job.id}</div>
                       </div>
                     </div>
@@ -910,15 +754,15 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
                       </div>
                       <div class="detail-row">
                         <span class="detail-label">Amount:</span>
-                        <span>${formatXLM(job.budgetAmount || 0)}</span>
+                        <span>${formatXLM(job.budget || '0')}</span>
                       </div>
                       <div class="detail-row">
                         <span class="detail-label">Completion Date:</span>
-                        <span>${formatDate(new Date())}</span>
+                        <span>${formatDate(new Date().toISOString())}</span>
                       </div>
                       <div class="amount-row">
                         <span>Total Due:</span>
-                        <span>${formatXLM(job.budgetAmount || 0)}</span>
+                        <span>${formatXLM(job.budget || '0')}</span>
                       </div>
                     </div>
 
@@ -945,9 +789,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
           </button>
         </div>
       )}
-    </div>
 
-      {/* Share Modal */}
       {showShareModal && job && (
         <ShareJobModal
           job={job}

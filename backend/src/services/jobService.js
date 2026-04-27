@@ -4,8 +4,10 @@
  */
 "use strict";
 
-const pool = require("../db/pool");
+const { query } = require("../db/pool");
 const { getTimezoneOffset } = require("date-fns-tz");
+
+// ─── constants ───────────────────────────────────────────────────────────────
 
 const VALID_STATUSES = ["open", "in_progress", "completed", "cancelled"];
 
@@ -78,18 +80,13 @@ function rowToJob(row) {
   };
 }
 
-async function createJob({
-  title,
-  description,
-  budget,
-  currency = "XLM",
-  category,
-  skills,
-  deadline,
-  timezone,
-  screeningQuestions,
-  clientAddress,
-}) {
+// ─── service functions ───────────────────────────────────────────────────────
+
+/**
+ * Create a new job listing.
+ * Note: client's profile row must already exist (FK constraint).
+ */
+async function createJob({ title, description, budget, currency = 'XLM', category, skills, deadline, clientAddress, timezone, screeningQuestions }) {
   validatePublicKey(clientAddress);
 
   if (!title || title.length < 10) {
@@ -319,7 +316,8 @@ async function deleteJob(jobId) {
 }
 
 async function boostJob(jobId) {
-  const { rows } = await pool.query("SELECT * FROM jobs WHERE id = $1", [jobId]);
+  // Verify job exists
+  const { rows } = await query("SELECT * FROM jobs WHERE id = $1", [jobId]);
   if (!rows.length) {
     const e = new Error("Job not found");
     e.status = 404;

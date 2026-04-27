@@ -11,6 +11,15 @@
   },
   "overrides": [
     {
+      "files": [
+        "src/services/store.js",
+        "src/middleware/rateLimiter.js"
+      ],
+      "parserOptions": {
+        "sourceType": "module"
+      }
+    },
+    {
       "files": ["**/*.test.js"],
       "env": {
         "jest": true
