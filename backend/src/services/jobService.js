@@ -10,7 +10,7 @@
  */
 "use strict";
 
-const pool = require("../db/pool");
+const { query } = require("../db/pool");
 const { getTimezoneOffset } = require("date-fns-tz");
 
 /**
@@ -503,7 +503,8 @@ async function deleteJob(jobId) {
  * @throws {Error} 404 — job not found.
  */
 async function boostJob(jobId) {
-  const { rows } = await pool.query("SELECT * FROM jobs WHERE id = $1", [jobId]);
+  // Verify job exists
+  const { rows } = await query("SELECT * FROM jobs WHERE id = $1", [jobId]);
   if (!rows.length) {
     const e = new Error("Job not found");
     e.status = 404;

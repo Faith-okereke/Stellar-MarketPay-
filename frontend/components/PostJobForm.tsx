@@ -11,6 +11,7 @@ import { JOB_CATEGORIES, SKILL_SUGGESTIONS, formatUSDEquivalent, getMonthlyEstim
 import { useRouter } from "next/router";
 import clsx from "clsx";
 import { useToast } from "@/components/Toast";
+import { usePriceContext } from "@/contexts/PriceContext";
 import type { Currency } from "@/utils/types";
 
 interface PostJobFormProps { publicKey: string; }
@@ -23,6 +24,8 @@ type FormState = {
   category: string;
   skillInput: string;
   deadline: string;
+  currency: Currency;
+  timezone: string;
 };
 
 type JobTemplate = {
@@ -36,6 +39,7 @@ type JobTemplate = {
 };
 
 const JOB_TEMPLATES_STORAGE_KEY = "stellar-marketpay-job-templates";
+const SCOPE_PREFILL_STORAGE_KEY = "marketpay_scope_prefill";
 const emptyForm: FormState = {
   title: "",
   description: "",
@@ -43,14 +47,16 @@ const emptyForm: FormState = {
   category: "",
   skillInput: "",
   deadline: "",
+  currency: "XLM" as Currency,
+  timezone: "",
 };
 
 export default function PostJobForm({ publicKey }: PostJobFormProps) {
   const router = useRouter();
   const toast = useToast();
   const { xlmPriceUsd } = usePriceContext();
-  const [form, setForm] = useState({
-    title: "", description: "", budget: "", category: "", skillInput: "", deadline: "", currency: "XLM" as Currency,
+  const [form, setForm] = useState<FormState>({
+    title: "", description: "", budget: "", category: "", skillInput: "", deadline: "", currency: "XLM" as Currency, timezone: "",
   });
   const [skills, setSkills] = useState<string[]>([]);
   const [screeningQuestions, setScreeningQuestions] = useState<string[]>([""]);
@@ -59,6 +65,33 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [templates, setTemplates] = useState<JobTemplate[]>(() => readTemplates());
+  const [selectedTemplateName, setSelectedTemplateName] = useState("");
+  const [templateNameInput, setTemplateNameInput] = useState("");
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [pendingOverwriteTemplate, setPendingOverwriteTemplate] = useState<JobTemplate | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rawPrefill = window.localStorage.getItem(SCOPE_PREFILL_STORAGE_KEY);
+    if (!rawPrefill) return;
+    try {
+      const prefill = JSON.parse(rawPrefill);
+      if (prefill && typeof prefill === "object") {
+        setForm((prev) => ({
+          ...prev,
+          title: typeof prefill.title === "string" ? prefill.title : prev.title,
+          description: typeof prefill.description === "string" ? prefill.description : prev.description,
+          category: typeof prefill.category === "string" ? prefill.category : prev.category,
+        }));
+      }
+    } catch (_) {
+      // Ignore malformed prefill payload
+    } finally {
+      window.localStorage.removeItem(SCOPE_PREFILL_STORAGE_KEY);
+    }
+  }, []);
 
   const usdPreview = formatUSDEquivalent(form.budget, xlmPriceUsd);
   const monthlyEst = getMonthlyEstimate(form.budget, xlmPriceUsd);
@@ -185,6 +218,72 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
       setLoading(false);
     }
   };
+
+  const handleLoadTemplate = (name: string) => {
+    const template = templates.find((t) => t.name === name);
+    if (template) {
+      setForm((f) => ({
+        ...f,
+        title: template.title,
+        description: template.description,
+        budget: template.budget,
+        category: template.category,
+        deadline: template.deadline,
+      }));
+      setSkills(template.skills);
+      setSelectedTemplateName(name);
+    }
+  };
+
+  const handleSaveTemplate = () => {
+    if (!templateNameInput.trim()) {
+      setTemplateError("Template name is required");
+      return;
+    }
+    const existing = templates.find((t) => t.name === templateNameInput);
+    if (existing) {
+      setPendingOverwriteTemplate(existing);
+      return;
+    }
+    const newTemplate: JobTemplate = {
+      name: templateNameInput, title: form.title, description: form.description,
+      budget: form.budget, category: form.category, skills, deadline: form.deadline,
+    };
+    const updated = [...templates, newTemplate];
+    setTemplates(updated);
+    localStorage.setItem(JOB_TEMPLATES_STORAGE_KEY, JSON.stringify(updated));
+    setTemplateNameInput("");
+    setTemplateError(null);
+    toast.success(`Template "${templateNameInput}" saved`);
+  };
+
+  const handleConfirmOverwrite = () => {
+    const updated = templates.map((t) =>
+      t.name === templateNameInput
+        ? { ...t, title: form.title, description: form.description, budget: form.budget, category: form.category, skills, deadline: form.deadline }
+        : t
+    );
+    setTemplates(updated);
+    localStorage.setItem(JOB_TEMPLATES_STORAGE_KEY, JSON.stringify(updated));
+    setTemplateNameInput("");
+    setPendingOverwriteTemplate(null);
+    toast.success("Template updated");
+  };
+
+  const handleCancelOverwrite = () => setPendingOverwriteTemplate(null);
+
+  const handleDeleteTemplate = () => setShowDeleteConfirmation(true);
+
+  const handleConfirmDelete = () => {
+    const updated = templates.filter((t) => t.name !== selectedTemplateName);
+    setTemplates(updated);
+    localStorage.setItem(JOB_TEMPLATES_STORAGE_KEY, JSON.stringify(updated));
+    setSelectedTemplateName("");
+    setShowDeleteConfirmation(false);
+    toast.success("Template deleted");
+  };
+
+  const handleCancelDelete = () => setShowDeleteConfirmation(false);
 
   return (
     <div className="card max-w-2xl mx-auto animate-slide-up">

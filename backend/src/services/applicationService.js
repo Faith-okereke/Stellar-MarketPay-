@@ -158,11 +158,9 @@ async function submitApplication({
 
   let appRow;
   try {
-    const safeScreeningAnswers =
-      screeningAnswers && typeof screeningAnswers === "object" ? screeningAnswers : {};
     const { rows } = await pool.query(
-      `INSERT INTO applications (job_id, freelancer_address, proposal, bid_amount, currency, screening_answers, status, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'pending', NOW())
+      `INSERT INTO applications (job_id, freelancer_address, proposal, bid_amount, currency, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
        RETURNING *`,
       [
         jobId,

@@ -486,7 +486,7 @@ export function streamAccountTransactions(
     .cursor("now")
     .stream({
       onmessage: (tx) => {
-        onTransaction(tx);
+        onTransaction(tx as unknown as Horizon.ServerApi.TransactionRecord);
       },
       onerror: (error) => {
         console.error("Horizon stream error:", error);
