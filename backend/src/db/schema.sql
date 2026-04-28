@@ -26,7 +26,14 @@ ALTER TABLE profiles
 
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS did_hash TEXT,
-  ADD COLUMN IF NOT EXISTS is_kyc_verified BOOLEAN NOT NULL DEFAULT FALSE;
+  ADD COLUMN IF NOT EXISTS is_kyc_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS github_username TEXT,
+  ADD COLUMN IF NOT EXISTS github_avatar_url TEXT,
+  ADD COLUMN IF NOT EXISTS github_profile_url TEXT,
+  ADD COLUMN IF NOT EXISTS github_primary_languages TEXT[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS github_top_repos JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS github_token_encrypted TEXT,
+  ADD COLUMN IF NOT EXISTS github_connected_at TIMESTAMPTZ;
 
 -- ─────────────────────────────────────────
 -- jobs
@@ -101,6 +108,36 @@ CREATE TABLE IF NOT EXISTS applications (
 
 CREATE INDEX IF NOT EXISTS applications_job_id_idx             ON applications(job_id);
 CREATE INDEX IF NOT EXISTS applications_freelancer_address_idx ON applications(freelancer_address);
+
+-- ─────────────────────────────────────────
+-- job analytics (Issue #212)
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS job_views (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id          UUID        NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  ip_hash         TEXT        NOT NULL,
+  viewed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS job_views_job_id_idx ON job_views(job_id, viewed_at DESC);
+CREATE INDEX IF NOT EXISTS job_views_job_ip_idx ON job_views(job_id, ip_hash);
+
+-- ─────────────────────────────────────────
+-- encrypted private messages (Issue #213)
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS private_messages (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sender_address        TEXT        NOT NULL REFERENCES profiles(public_key),
+  recipient_address     TEXT        NOT NULL REFERENCES profiles(public_key),
+  sender_public_key     TEXT        NOT NULL,
+  recipient_public_key  TEXT        NOT NULL,
+  nonce                 TEXT        NOT NULL,
+  cipher_text           TEXT        NOT NULL,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS private_messages_participants_idx
+  ON private_messages(sender_address, recipient_address, created_at DESC);
 
 ALTER TABLE applications
   ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XLM',
@@ -230,61 +267,44 @@ CREATE INDEX IF NOT EXISTS contract_events_job_id_idx ON contract_events(job_id)
 CREATE INDEX IF NOT EXISTS contract_events_created_at_idx ON contract_events(created_at DESC);
 
 -- ─────────────────────────────────────────
--- contract_audit_log
+-- job_drafts (Issue #219)
 -- ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS contract_audit_log (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  function_name   TEXT        NOT NULL,
-  caller_address  TEXT        NOT NULL,
-  job_id          UUID        REFERENCES jobs(id),
-  tx_hash         TEXT        NOT NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS contract_audit_log_job_id_idx ON contract_audit_log(job_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS contract_audit_log_caller_idx ON contract_audit_log(caller_address, created_at DESC);
-
--- ─────────────────────────────────────────
--- job_invitations
--- ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS job_invitations (
+CREATE TABLE IF NOT EXISTS job_drafts (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  job_id              UUID        NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-  client_address      TEXT        NOT NULL REFERENCES profiles(public_key),
-  freelancer_address  TEXT        NOT NULL REFERENCES profiles(public_key),
+  client_address      TEXT        NOT NULL REFERENCES profiles(public_key) ON DELETE CASCADE,
+  title               TEXT        NOT NULL,
+  description         TEXT        NOT NULL,
+  budget              NUMERIC(20,7) NOT NULL,
+  category            TEXT        NOT NULL,
+  skills              TEXT[]      NOT NULL DEFAULT '{}',
+  currency            TEXT        NOT NULL DEFAULT 'XLM',
+  timezone            TEXT,
+  visibility          TEXT        NOT NULL DEFAULT 'public',
+  screening_questions TEXT[]      NOT NULL DEFAULT '{}',
+  deadline            TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (job_id, freelancer_address)
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS job_invitations_freelancer_idx ON job_invitations(freelancer_address, created_at DESC);
+CREATE INDEX IF NOT EXISTS job_drafts_client_idx ON job_drafts(client_address);
+CREATE INDEX IF NOT EXISTS job_drafts_updated_at_idx ON job_drafts(updated_at DESC);
 
 -- ─────────────────────────────────────────
--- proposal_templates
+-- platform_stats (Issue #232)
 -- ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS proposal_templates (
-  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  freelancer_address  TEXT        NOT NULL REFERENCES profiles(public_key) ON DELETE CASCADE,
-  name                TEXT        NOT NULL,
-  content             TEXT        NOT NULL,
-  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (freelancer_address, name)
+CREATE TABLE IF NOT EXISTS platform_stats (
+  id                  INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  total_jobs_posted   INTEGER     NOT NULL DEFAULT 0,
+  total_escrow_xlm    NUMERIC(20,7) NOT NULL DEFAULT 0,
+  active_users_30d    INTEGER     NOT NULL DEFAULT 0,
+  completion_rate     NUMERIC(5,2) NOT NULL DEFAULT 0,
+  avg_job_budget      NUMERIC(20,7) NOT NULL DEFAULT 0,
+  last_updated        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS proposal_templates_freelancer_idx ON proposal_templates(freelancer_address, updated_at DESC);
+INSERT INTO platform_stats (id)
+VALUES (1)
+ON CONFLICT (id) DO NOTHING;
 
 -- ─────────────────────────────────────────
--- price_alert_preferences
--- ─────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS price_alert_preferences (
-  freelancer_address          TEXT PRIMARY KEY REFERENCES profiles(public_key) ON DELETE CASCADE,
-  min_xlm_price_usd           NUMERIC(20,7),
-  max_xlm_price_usd           NUMERIC(20,7),
-  email_notifications_enabled BOOLEAN     NOT NULL DEFAULT FALSE,
-  email                       TEXT,
-  last_min_alert_at           TIMESTAMPTZ,
-  last_max_alert_at           TIMESTAMPTZ,
-  created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
 

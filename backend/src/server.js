@@ -4,17 +4,18 @@
  */
 "use strict";
 
-const express     = require("express");
-const cors        = require("cors");
-const helmet      = require("helmet");
-const morgan      = require("morgan");
-const rateLimit   = require("express-rate-limit");
-const http        = require("http");
-const { WebSocketServer } = require("ws");
-const nodemailer  = require("nodemailer");
 require("dotenv").config();
 
-const jobRoutes         = require("./routes/jobs");
+const http = require("http");
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const morgan = require("morgan");
+const rateLimit = require("express-rate-limit");
+const { WebSocketServer } = require("ws");
+const nodemailer = require("nodemailer");
+
+const jobRoutes = require("./routes/jobs");
 const applicationRoutes = require("./routes/applications");
 const profileRoutes     = require("./routes/profiles");
 const escrowRoutes      = require("./routes/escrow");
@@ -23,8 +24,12 @@ const authRoutes        = require("./routes/auth");
 const ratingRoutes      = require("./routes/ratings");
 const progressRoutes    = require("./routes/progress");
 const eventRoutes       = require("./routes/events");
-const auditRoutes       = require("./routes/audit");
-const proposalTemplateRoutes = require("./routes/proposalTemplates");
+const statsRoutes       = require("./routes/stats");
+const contributorRoutes = require("./routes/contributors");
+const verificationRoutes = require("./routes/verification");
+const nftRoutes         = require("./routes/nft");
+const aiScorerRoutes    = require("./routes/aiScorer");
+
 const migrate           = require("./db/migrate");
 const IndexerService    = require("./services/indexerService");
 const { PriceAlertService } = require("./services/priceAlertService");
@@ -120,7 +125,7 @@ const priceAlertService = new PriceAlertService({
 app.locals.indexerService = indexerService;
 app.locals.broadcastRealtime = broadcastRealtime;
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
+// Middleware
 app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "20kb" }));
@@ -145,8 +150,12 @@ app.use("/api/escrow",        escrowRoutes);
 app.use("/api/ratings",       ratingRoutes);
 app.use("/api/progress",      progressRoutes);
 app.use("/api/events",        eventRoutes);
-app.use("/api/audit",         auditRoutes);
-app.use("/api/proposal-templates", proposalTemplateRoutes);
+app.use("/api/stats",         statsRoutes);
+app.use("/api/contributors",  contributorRoutes);
+app.use("/api/verification",  verificationRoutes);
+app.use("/api/nft",           nftRoutes);
+app.use("/api/ai-scorer",     aiScorerRoutes);
+
 app.get("/api/indexer/health", (req, res) => {
   res.json({
     status: "ok",
@@ -154,11 +163,12 @@ app.get("/api/indexer/health", (req, res) => {
   });
 });
 
-// ─── Error handling ───────────────────────────────────────────────────────────
-app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
-app.use((err, req, res) => {
+app.use((err, req, res, next) => {
   console.error("[Error]", err.message);
-  res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+
+  res.status(err.status || 500).json({
+    error: err.message || "Internal server error",
+  });
 });
 
 const wsServer = new WebSocketServer({ noServer: true });
