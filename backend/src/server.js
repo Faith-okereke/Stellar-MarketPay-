@@ -14,14 +14,18 @@ const rateLimit = require("express-rate-limit");
 
 const jobRoutes = require("./routes/jobs");
 const applicationRoutes = require("./routes/applications");
-const profileRoutes = require("./routes/profiles");
-const escrowRoutes = require("./routes/escrow");
-const healthRoutes = require("./routes/health");
-const authRoutes = require("./routes/auth");
-const ratingRoutes = require("./routes/ratings");
-const progressRoutes = require("./routes/progress");
+const profileRoutes     = require("./routes/profiles");
+const escrowRoutes      = require("./routes/escrow");
+const healthRoutes      = require("./routes/health");
+const authRoutes        = require("./routes/auth");
+const ratingRoutes      = require("./routes/ratings");
+const progressRoutes    = require("./routes/progress");
+const eventRoutes       = require("./routes/events");
+const migrate           = require("./db/migrate");
+const IndexerService    = require("./services/indexerService");
+const pool              = require("./db/pool");
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
 const WS_OPEN = 1;

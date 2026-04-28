@@ -190,3 +190,21 @@ CREATE TABLE IF NOT EXISTS scope_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS scope_sessions_expires_at_idx ON scope_sessions(expires_at);
+
+-- ─────────────────────────────────────────
+-- contract_events (Issue #199)
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS contract_events (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id          TEXT        NOT NULL,                -- May be UUID or contract String ID
+  event_type      TEXT        NOT NULL,                -- escrow_created, work_started, etc.
+  contract_id     TEXT        NOT NULL,
+  tx_hash         TEXT        NOT NULL,
+  ledger          BIGINT      NOT NULL,
+  data            JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS contract_events_job_id_idx ON contract_events(job_id);
+CREATE INDEX IF NOT EXISTS contract_events_created_at_idx ON contract_events(created_at DESC);
+

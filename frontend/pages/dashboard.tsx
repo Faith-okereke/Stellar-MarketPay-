@@ -4,6 +4,7 @@
  */
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import WalletConnect from "@/components/WalletConnect";
 import { fetchMyJobs, fetchMyApplications } from "@/lib/api";
 import { getXLMBalance, getUSDCBalance, streamAccountTransactions } from "@/lib/stellar";
@@ -20,8 +21,10 @@ interface DashboardProps {
 }
 
 type Tab = "posted" | "applied" | "send" | "edit_profile";
+const REPOST_JOB_PREFILL_STORAGE_KEY = "marketpay_repost_job_prefill";
 
 export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>("posted");
   const [myJobs, setMyJobs] = useState<Job[]>([]);
   const [myApplications, setMyApplications] = useState<Application[]>([]);
@@ -46,6 +49,25 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
 
   const [processedTxs, setProcessedTxs] = useState<Set<string>>(new Set());
   const { info, success } = useToast();
+  const isRepostable = (status: Job["status"]) => status === "expired" || status === "cancelled";
+
+  const handleRepost = (job: Job) => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      REPOST_JOB_PREFILL_STORAGE_KEY,
+      JSON.stringify({
+        title: job.title,
+        description: job.description,
+        budget: job.budget,
+        category: job.category,
+        skills: job.skills,
+        currency: job.currency,
+        timezone: job.timezone || "",
+        screeningQuestions: job.screeningQuestions || [],
+      })
+    );
+    router.push("/post-job?mode=repost");
+  };
 
   useEffect(() => {
     if (!publicKey) return;
@@ -239,21 +261,28 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
               </button>
             </div>
             {myJobs.map((job) => (
-              <Link key={job.id} href={`/jobs/${job.id}`}>
-                <div className="card-hover flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">
+              <div key={job.id} className="card-hover flex items-center justify-between gap-4">
+                  <Link href={`/jobs/${job.id}`} className="flex-1 min-w-0 block">
                     <div className="flex items-center gap-2 mb-1">
                       <span className={statusClass(job.status)}>{statusLabel(job.status)}</span>
                       <span className="text-xs text-amber-800">{job.category}</span>
                     </div>
                     <p className="font-display font-semibold text-amber-100 truncate">{job.title}</p>
                     <p className="text-xs text-amber-800 mt-1">{job.applicantCount} applicant{job.applicantCount !== 1 ? "s" : ""} · {timeAgo(job.createdAt)}</p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
+                  </Link>
+                  <div className="text-right flex-shrink-0 space-y-2">
                     <p className="font-mono font-semibold text-market-400">{formatXLM(job.budget)}</p>
+                    {isRepostable(job.status) && (
+                      <button
+                        type="button"
+                        className="btn-secondary text-xs px-3 py-1.5"
+                        onClick={() => handleRepost(job)}
+                      >
+                        Repost Job
+                      </button>
+                    )}
                   </div>
-                </div>
-              </Link>
+              </div>
             ))}
           </div>
         )

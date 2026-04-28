@@ -253,7 +253,12 @@ impl MarketPayContract {
         }
 
         escrow.status = EscrowStatus::InProgress;
-        env.storage().instance().set(&DataKey::Escrow(job_id), &escrow);
+        env.storage().instance().set(&DataKey::Escrow(job_id.clone()), &escrow);
+
+        env.events().publish(
+            (symbol_short!("started"), client),
+            job_id,
+        );
     }
 
     /// Client approves completed work and releases funds to the freelancer.
@@ -277,7 +282,7 @@ impl MarketPayContract {
         let mut remaining_amount = 0;
         for ms in escrow.milestones.iter() {
             if !ms.is_completed {
-                remaining_amount += ms.amount;
+                remaining_amount = remaining_amount.checked_add(ms.amount).expect("Arithmetic overflow");
             }
         }
         
@@ -348,7 +353,7 @@ impl MarketPayContract {
         let mut remaining_amount = 0;
         for ms in escrow.milestones.iter() {
             if !ms.is_completed {
-                remaining_amount += ms.amount;
+                remaining_amount = remaining_amount.checked_add(ms.amount).expect("Arithmetic overflow");
             }
         }
         let release_amount = if escrow.milestones.is_empty() { escrow.amount } else { remaining_amount };
@@ -585,8 +590,24 @@ impl MarketPayContract {
 
     /// [PLACEHOLDER] Raise a dispute — requires admin resolution.
     /// See ROADMAP.md v2.1 — DAO Governance.
-    pub fn raise_dispute(_env: Env, _job_id: String, _caller: Address) {
-        panic!("Dispute resolution coming in v2.1 — see ROADMAP.md");
+    pub fn raise_dispute(env: Env, job_id: String, caller: Address) {
+        caller.require_auth();
+        
+        let mut escrow: Escrow = env.storage().instance()
+            .get(&DataKey::Escrow(job_id.clone()))
+            .expect("Escrow not found");
+        
+        if escrow.client != caller && escrow.freelancer != caller {
+            panic!("Only participants can raise a dispute");
+        }
+        
+        escrow.status = EscrowStatus::Disputed;
+        env.storage().instance().set(&DataKey::Escrow(job_id.clone()), &escrow);
+
+        env.events().publish(
+            (symbol_short!("disputed"), caller),
+            job_id,
+        );
     }
 
     /// [PLACEHOLDER] Milestone-based partial release.
@@ -998,5 +1019,73 @@ mod regression_tests {
         
         let escrow = contract_client.get_escrow(&job_id);
         assert_eq!(escrow.status, EscrowStatus::Released);
+    }
+}
+
+#[cfg(test)]
+mod fuzz_testing {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
+
+    #[test]
+    fn fuzz_create_escrow_random_amounts() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register(MarketPayContract, ());
+        let client = MarketPayContractClient::new(&env, &id);
+        
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let freelancer = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+
+        // Test a range of amounts
+        for i in 1..100 {
+            let amount = (i as i128) * 1000;
+            let job_id = String::from_str(&env, &format!("fuzz_job_{}", i));
+            
+            let user = Address::generate(&env);
+            token_admin.mint(&user, &amount);
+            
+            client.create_escrow(&job_id, &user, &freelancer, &token_id, &amount, &None);
+            
+            let escrow = client.get_escrow(&job_id);
+            assert_eq!(escrow.amount, amount);
+        }
+    }
+
+    #[test]
+    fn fuzz_release_escrow_lifecycle() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register(MarketPayContract, ());
+        let client = MarketPayContractClient::new(&env, &id);
+        
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let user = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract(admin.clone());
+        let token_admin = token::StellarAssetClient::new(&env, &token_id);
+        
+        token_admin.mint(&user, &1000000);
+
+        for i in 1..50 {
+            let job_id = String::from_str(&env, &format!("lifecycle_{}", i));
+            client.create_escrow(&job_id, &user, &freelancer, &token_id, &1000, &None);
+            
+            // Randomly decide to start work or not
+            if i % 2 == 0 {
+                client.start_work(&job_id, &user);
+            }
+            
+            client.release_escrow(&job_id, &user);
+            
+            let escrow = client.get_escrow(&job_id);
+            assert_eq!(escrow.status, EscrowStatus::Released);
+        }
     }
 }

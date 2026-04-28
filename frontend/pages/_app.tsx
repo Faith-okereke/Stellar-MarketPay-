@@ -1,15 +1,37 @@
 import type { AppProps } from "next/app";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
+import { useRouter } from "next/router";
 import Navbar from "@/components/Navbar";
 import { connectWallet, getConnectedPublicKey, signTransactionWithWallet } from "@/lib/wallet";
 import { fetchAuthChallenge, verifyAuthChallenge, setJwtToken } from "@/lib/api";
 import "@/styles/globals.css";
 import { ToastProvider } from "@/components/Toast";
 import { PriceProvider } from "@/contexts/PriceContext";
+import ShortcutsModal from "@/components/ShortcutsModal";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 
 export default function App({ Component, pageProps }: AppProps) {
   const [publicKey, setPublicKey] = useState<string | null>(null);
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const router = useRouter();
+
+  const isJobDetailPage = router.pathname === "/jobs/[id]";
+
+  const handleToggleShortcutsModal = useCallback(() => {
+    setShortcutsModalOpen((current) => !current);
+  }, []);
+
+  useKeyboardShortcuts({
+    isJobDetailPage,
+    onGoToJobs: () => router.push("/jobs"),
+    onGoToDashboard: () => router.push("/dashboard"),
+    onNewJobPost: () => router.push("/post-job"),
+    onToggleShortcutsModal: handleToggleShortcutsModal,
+    onJobApply: () => window.dispatchEvent(new CustomEvent("shortcut-apply-job")),
+    onJobBackToListing: () => router.push("/jobs"),
+    shortcutsModalOpen,
+  });
 
   const handleAuthAndConnect = async (pk: string) => {
     try {
@@ -67,6 +89,11 @@ export default function App({ Component, pageProps }: AppProps) {
           <main>
             <Component {...pageProps} publicKey={publicKey} onConnect={handleConnect} />
           </main>
+          <ShortcutsModal
+            isOpen={shortcutsModalOpen}
+            onClose={() => setShortcutsModalOpen(false)}
+            showJobDetailShortcuts={isJobDetailPage}
+          />
         </div>
         </PriceProvider>
       </ToastProvider>

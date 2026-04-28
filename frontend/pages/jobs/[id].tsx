@@ -153,7 +153,56 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
       })
       .catch(() => router.push("/jobs"))
       .finally(() => setLoading(false));
-  }, [id, router]);
+  }, [id, router, router.isReady]);
+
+
+  useEffect(() => {
+    const handleApplyShortcut = () => {
+      if (job?.status !== "open") return;
+      if (!publicKey) return;
+      if (isClient) return;
+      if (hasApplied) return;
+      setShowApplyForm(true);
+    };
+
+    window.addEventListener("shortcut-apply-job", handleApplyShortcut);
+    return () => window.removeEventListener("shortcut-apply-job", handleApplyShortcut);
+  }, [job?.status, publicKey, isClient, hasApplied]);
+
+  useEffect(() => {
+    if (!isClient || applications.length === 0) {
+      setApplicantProfiles({});
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const profileEntries = await Promise.all(
+        applications.map(async (application) => {
+          try {
+            const profile = await fetchProfile(application.freelancerAddress);
+            return [application.freelancerAddress, profile] as const;
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      if (cancelled) return;
+
+      const nextProfiles = profileEntries.reduce<Record<string, UserProfile>>((accumulator, entry) => {
+        if (entry) accumulator[entry[0]] = entry[1];
+        return accumulator;
+      }, {});
+
+      setApplicantProfiles(nextProfiles);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applications, isClient]);
 
   const handleAcceptApplication = async (applicationId: string) => {
     if (!publicKey || !id) return;

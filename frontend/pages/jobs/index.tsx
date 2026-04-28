@@ -4,7 +4,7 @@
 */
 import JobCard, { JobCardSkeleton } from "@/components/JobCard";
 import { fetchJobs } from "@/lib/api";
-import { JOB_CATEGORIES, CATEGORY_ICONS } from "@/utils/format";
+import { JOB_CATEGORIES, CATEGORY_ICONS, categoryToSlug } from "@/utils/format";
 import type { Job } from "@/utils/types";
 import clsx from "clsx";
 import Link from "next/link";
@@ -296,29 +296,29 @@ export default function JobsPage() {
           <div>
             <p className="label">Category</p>
             <div className="space-y-1">
-              <button onClick={() => setFilter("category", "")}
+              <Link href="/jobs"
                 className={clsx(
-                  "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200",
+                  "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200 block",
                   !category
                     ? "bg-market-500/20 text-market-300 font-medium ring-1 ring-market-500/30"
                     : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8 hover:translate-x-0.5"
                 )}>
                 🗂️ All Categories
                 <span className="ml-1 text-xs text-amber-800">({jobs.length})</span>
-              </button>
+              </Link>
               {JOB_CATEGORIES.map((cat) => {
                 const count = jobs.filter((j) => j.category === cat).length;
                 return (
-                  <button key={cat} onClick={() => setFilter("category", cat)}
+                  <Link key={cat} href={`/jobs/category/${categoryToSlug(cat)}`}
                     className={clsx(
-                      "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200",
+                      "w-full text-left px-3 py-2 rounded-lg text-sm font-body transition-all duration-200 block",
                       category === cat
                         ? "bg-market-500/20 text-market-300 font-medium ring-1 ring-market-500/30"
                         : "text-amber-700 hover:text-amber-400 hover:bg-market-500/8 hover:translate-x-0.5"
                     )}>
                     {CATEGORY_ICONS[cat] ?? ""} {cat}
                     <span className="ml-1 text-xs text-amber-800">({count})</span>
-                  </button>
+                  </Link>
                 );
               })}
             </div>

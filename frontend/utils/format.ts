@@ -110,11 +110,23 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function statusLabel(status: JobStatus): string {
-  return { open: "Open", in_progress: "In Progress", completed: "Completed", cancelled: "Cancelled" }[status];
+  return {
+    open: "Open",
+    in_progress: "In Progress",
+    completed: "Completed",
+    cancelled: "Cancelled",
+    expired: "Expired",
+  }[status];
 }
 
 export function statusClass(status: JobStatus): string {
-  return { open: "badge-open", in_progress: "badge-progress", completed: "badge-complete", cancelled: "badge-cancelled" }[status];
+  return {
+    open: "badge-open",
+    in_progress: "badge-progress",
+    completed: "badge-complete",
+    cancelled: "badge-cancelled",
+    expired: "badge-expired",
+  }[status];
 }
 
 export function availabilityStatusLabel(status?: Availability["status"] | null): string {
@@ -155,6 +167,14 @@ export const CATEGORY_ICONS: Record<string, string> = {
   "Mobile Development": "📱",
   "Other": "📦",
 };
+
+export function categoryToSlug(category: string): string {
+  return category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+export function slugToCategory(slug: string): string | undefined {
+  return JOB_CATEGORIES.find(cat => categoryToSlug(cat) === slug);
+}
 
 /**
  * Common Web3 and development skill suggestions for autocomplete.
