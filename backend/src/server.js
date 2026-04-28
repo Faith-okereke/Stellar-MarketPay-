@@ -6,11 +6,14 @@
 
 require("dotenv").config();
 
+const http = require("http");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
+const { WebSocketServer } = require("ws");
+const nodemailer = require("nodemailer");
 
 const jobRoutes = require("./routes/jobs");
 const applicationRoutes = require("./routes/applications");
@@ -22,6 +25,10 @@ const ratingRoutes      = require("./routes/ratings");
 const progressRoutes    = require("./routes/progress");
 const eventRoutes       = require("./routes/events");
 const statsRoutes       = require("./routes/stats");
+const contributorRoutes = require("./routes/contributors");
+const verificationRoutes = require("./routes/verification");
+const nftRoutes         = require("./routes/nft");
+const aiScorerRoutes    = require("./routes/aiScorer");
 
 const migrate           = require("./db/migrate");
 const IndexerService    = require("./services/indexerService");
@@ -144,6 +151,10 @@ app.use("/api/ratings",       ratingRoutes);
 app.use("/api/progress",      progressRoutes);
 app.use("/api/events",        eventRoutes);
 app.use("/api/stats",         statsRoutes);
+app.use("/api/contributors",  contributorRoutes);
+app.use("/api/verification",  verificationRoutes);
+app.use("/api/nft",           nftRoutes);
+app.use("/api/ai-scorer",     aiScorerRoutes);
 
 app.get("/api/indexer/health", (req, res) => {
   res.json({
