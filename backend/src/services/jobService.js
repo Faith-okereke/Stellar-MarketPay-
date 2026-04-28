@@ -1,12 +1,5 @@
 /**
  * src/services/jobService.js
- *
- * Job listings service — owns all reads and writes against the `jobs`
- * PostgreSQL table. Responsible for validation of job inputs, cursor-based
- * pagination, status transitions, escrow contract id linkage, listing-boost
- * (Featured) state, and timezone-aware filtering of the job feed.
- *
- * @module services/jobService
  */
 "use strict";
 
@@ -231,7 +224,7 @@ async function createJob({
     [
       title.trim(),
       description.trim(),
-      parseFloat(budget).toFixed(7),
+      parseFloat(budget),
       currency,
       category,
       safeSkills,
@@ -319,7 +312,7 @@ async function listJobs({ category, status = "open", limit = 50, search, cursor,
   const conditions = [];
   const params = [];
 
-  if (status && VALID_STATUSES.includes(status)) {
+  if (status) {
     params.push(status);
     conditions.push(`status = $${params.length}`);
   }
@@ -365,8 +358,8 @@ async function listJobs({ category, status = "open", limit = 50, search, cursor,
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
-  params.push(safeLimit + 1);
+
+  params.push(limit);
 
   const { rows } = await pool.query(
     `SELECT * FROM jobs ${where} ORDER BY
@@ -375,19 +368,14 @@ async function listJobs({ category, status = "open", limit = 50, search, cursor,
     params
   );
 
-  const hasMore = rows.length > safeLimit;
-  const currentRows = hasMore ? rows.slice(0, safeLimit) : rows;
-  const nextCursor = hasMore ? encodeCursor(currentRows[currentRows.length - 1]) : null;
+  let jobs = rows.map(rowToJob);
 
   let filteredJobs = currentRows.map(rowToJob);
   if (timezone) {
     filteredJobs = filteredJobs.filter((job) => isTimezoneCompatible(job.timezone, timezone));
   }
 
-  return {
-    jobs: filteredJobs,
-    nextCursor,
-  };
+  return { jobs };
 }
 
 /**
@@ -462,7 +450,7 @@ async function assignFreelancer(jobId, freelancerAddress) {
     throw e;
   }
 
-  return rowToJob(rows[0]);
+  return rows.map(rowToJob);
 }
 
 /**
@@ -546,7 +534,7 @@ async function boostJob(jobId) {
     [boostedUntil.toISOString(), jobId]
   );
 
-  return rowToJob(updateRows[0]);
+  return rowToJob(rows[0]);
 }
 
 /**
@@ -577,8 +565,6 @@ module.exports = {
   getJob,
   listJobs,
   listJobsByClient,
-  updateJobStatus,
-  assignFreelancer,
   updateJobEscrowId,
   deleteJob,
   boostJob,
