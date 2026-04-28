@@ -12,7 +12,7 @@ import { useRouter } from "next/router";
 import clsx from "clsx";
 import { useToast } from "@/components/Toast";
 import { usePriceContext } from "@/contexts/PriceContext";
-import type { Currency } from "@/utils/types";
+import type { Currency, Job } from "@/utils/types";
 
 interface PostJobFormProps { publicKey: string; }
 
@@ -40,6 +40,7 @@ type JobTemplate = {
 
 const JOB_TEMPLATES_STORAGE_KEY = "stellar-marketpay-job-templates";
 const SCOPE_PREFILL_STORAGE_KEY = "marketpay_scope_prefill";
+const REPOST_JOB_PREFILL_STORAGE_KEY = "marketpay_repost_job_prefill";
 const emptyForm: FormState = {
   title: "",
   description: "",
@@ -90,6 +91,40 @@ export default function PostJobForm({ publicKey }: PostJobFormProps) {
       // Ignore malformed prefill payload
     } finally {
       window.localStorage.removeItem(SCOPE_PREFILL_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rawRepostPrefill = window.localStorage.getItem(REPOST_JOB_PREFILL_STORAGE_KEY);
+    if (!rawRepostPrefill) return;
+
+    try {
+      const prefill = JSON.parse(rawRepostPrefill) as Partial<Job>;
+      setForm((prev) => ({
+        ...prev,
+        title: typeof prefill.title === "string" ? prefill.title : prev.title,
+        description: typeof prefill.description === "string" ? prefill.description : prev.description,
+        budget: typeof prefill.budget === "string" ? prefill.budget : prev.budget,
+        category: typeof prefill.category === "string" ? prefill.category : prev.category,
+        currency: prefill.currency === "USDC" || prefill.currency === "XLM" ? prefill.currency : prev.currency,
+        timezone: typeof prefill.timezone === "string" ? prefill.timezone : prev.timezone,
+        deadline: "",
+      }));
+
+      if (Array.isArray(prefill.skills)) {
+        setSkills(prefill.skills.filter((skill): skill is string => typeof skill === "string"));
+      }
+      if (Array.isArray(prefill.screeningQuestions)) {
+        const filteredQuestions = prefill.screeningQuestions.filter(
+          (question): question is string => typeof question === "string"
+        );
+        setScreeningQuestions(filteredQuestions.length > 0 ? filteredQuestions : [""]);
+      }
+    } catch (_) {
+      // Ignore malformed repost prefill payload
+    } finally {
+      window.localStorage.removeItem(REPOST_JOB_PREFILL_STORAGE_KEY);
     }
   }, []);
 
