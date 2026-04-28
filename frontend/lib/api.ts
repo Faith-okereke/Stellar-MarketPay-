@@ -516,3 +516,10 @@ export async function fetchRatings(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: Rating[] }>(`/api/ratings/${publicKey}`);
   return data.data;
 }
+
+// ─── Job Suggestions (Autocomplete) ─────────────────────────────────────
+
+export async function fetchJobSuggestions(query: string): Promise<{ type: 'title' | 'skill' | 'category'; value: string }[]> {
+  const { data } = await api.get<{ success: boolean; data: { type: string; value: string }[] }>("/api/jobs/suggestions", { params: { q: query } });
+  return data.data.map((item) => ({ type: item.type as 'title' | 'skill' | 'category', value: item.value }));
+}

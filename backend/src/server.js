@@ -23,8 +23,7 @@ const authRoutes        = require("./routes/auth");
 const ratingRoutes      = require("./routes/ratings");
 const progressRoutes    = require("./routes/progress");
 const eventRoutes       = require("./routes/events");
-const auditRoutes       = require("./routes/audit");
-const proposalTemplateRoutes = require("./routes/proposalTemplates");
+
 const migrate           = require("./db/migrate");
 const IndexerService    = require("./services/indexerService");
 const { PriceAlertService } = require("./services/priceAlertService");
@@ -145,8 +144,7 @@ app.use("/api/escrow",        escrowRoutes);
 app.use("/api/ratings",       ratingRoutes);
 app.use("/api/progress",      progressRoutes);
 app.use("/api/events",        eventRoutes);
-app.use("/api/audit",         auditRoutes);
-app.use("/api/proposal-templates", proposalTemplateRoutes);
+
 app.get("/api/indexer/health", (req, res) => {
   res.json({
     status: "ok",

@@ -174,6 +174,38 @@ router.post("/:id/score-proposals", verifyJWT, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/jobs/suggestions — autocomplete suggestions for search
+router.get("/suggestions", generalJobRateLimiter, async (req, res, next) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json({ success: true, data: [] });
+
+    const result = await listJobs({ status: "open", limit: 100 });
+    const jobs = result.jobs;
+    const query = q.toLowerCase();
+
+    const titleSuggestions = jobs
+      .filter(j => j.title.toLowerCase().includes(query))
+      .slice(0, 5)
+      .map(j => ({ type: "title", value: j.title }));
+
+    const skillSuggestions = jobs
+      .flatMap(j => j.skills || [])
+      .filter((skill, index, self) => self.indexOf(skill) === index)
+      .filter(skill => skill.toLowerCase().includes(query))
+      .slice(0, 5)
+      .map(skill => ({ type: "skill", value: skill }));
+
+    const categorySuggestions = [...new Set(jobs.map(j => j.category))]
+      .filter(cat => cat.toLowerCase().includes(query))
+      .slice(0, 5)
+      .map(cat => ({ type: "category", value: cat }));
+
+    const suggestions = [...titleSuggestions, ...skillSuggestions, ...categorySuggestions];
+    res.json({ success: true, data: suggestions });
+  } catch (e) { next(e); }
+});
+
 // GET /api/jobs/feed.rss — RSS 2.0 feed
 router.get("/feed.rss", generalJobRateLimiter, async (req, res, next) => {
   try {
