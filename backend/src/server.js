@@ -21,8 +21,11 @@ const authRoutes        = require("./routes/auth");
 const ratingRoutes      = require("./routes/ratings");
 const progressRoutes    = require("./routes/progress");
 const eventRoutes       = require("./routes/events");
+const statsRoutes       = require("./routes/stats");
+
 const migrate           = require("./db/migrate");
 const IndexerService    = require("./services/indexerService");
+const { PriceAlertService } = require("./services/priceAlertService");
 const pool              = require("./db/pool");
 
 const app  = express();
@@ -87,56 +90,65 @@ const indexerService = new IndexerService({
   horizonUrl: process.env.HORIZON_URL,
   broadcast: broadcastRealtime,
 });
+const smtpEnabled = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const smtpTransport = smtpEnabled
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    })
+  : null;
+const priceAlertService = new PriceAlertService({
+  broadcast: broadcastRealtime,
+  sendEmail: async ({ to, subject, text }) => {
+    if (!smtpTransport || !to) return;
+    await smtpTransport.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to,
+      subject,
+      text,
+    });
+  },
+});
 
 app.locals.indexerService = indexerService;
+app.locals.broadcastRealtime = broadcastRealtime;
 
 // Middleware
 app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "20kb" }));
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000")
-  .split(",")
-  .map((origin) => origin.trim());
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",").map(o => o.trim());
+app.use(cors({
+  origin: (origin, cb) => (!origin || allowedOrigins.includes(origin)) ? cb(null, true) : cb(new Error("CORS blocked")),
+  methods: ["GET", "POST", "PATCH", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+}));
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
-      return callback(new Error("CORS blocked"));
-    },
-    methods: ["GET", "POST", "PATCH", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
+// ─── Routes ───────────────────────────────────────────────────────────────────
+app.use("/health",            healthRoutes);
+app.use("/api/auth",          authRoutes);
+app.use("/api/jobs",          jobRoutes);
+app.use("/api/applications",  applicationRoutes);
+app.use("/api/profiles",      profileRoutes);
+app.use("/api/escrow",        escrowRoutes);
+app.use("/api/ratings",       ratingRoutes);
+app.use("/api/progress",      progressRoutes);
+app.use("/api/events",        eventRoutes);
+app.use("/api/stats",         statsRoutes);
 
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 150,
-    standardHeaders: true,
-    legacyHeaders: false,
-  })
-);
-
-// Routes
-app.use("/health", healthRoutes);
-app.use("/api/auth", authRoutes);
-app.use("/api/jobs", jobRoutes);
-app.use("/api/applications", applicationRoutes);
-app.use("/api/profiles", profileRoutes);
-app.use("/api/escrow", escrowRoutes);
-app.use("/api/ratings", ratingRoutes);
-app.use("/api/progress", progressRoutes);
-
-// Error handling
-app.use((req, res) => {
-  res.status(404).json({
-    error: `${req.method} ${req.path} not found`,
+app.get("/api/indexer/health", (req, res) => {
+  res.json({
+    status: "ok",
+    indexer: indexerService.getHealth(),
   });
 });
 
@@ -274,6 +286,7 @@ async function bootstrap() {
     await migrate();
     await cleanupExpiredScopeSessions();
     await indexerService.start();
+    priceAlertService.start();
     server.listen(PORT, () => {
       console.log(`
   🏪 Stellar MarketPay API

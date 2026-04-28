@@ -15,16 +15,11 @@ import {
   fetchApplications,
   acceptApplication,
   releaseEscrow,
+  scoreProposals,
+  fetchProfile,
+  inviteFreelancer,
 } from "@/lib/api";
-import {
-  formatXLM,
-  timeAgo,
-  formatDate,
-  shortenAddress,
-  statusLabel,
-  statusClass,
-  copyToClipboard,
-} from "@/utils/format";
+import { formatXLM, timeAgo, formatDate, shortenAddress, statusLabel, statusClass, copyToClipboard } from "@/utils/format";
 import {
   accountUrl,
   buildReleaseEscrowTransaction,
@@ -69,6 +64,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const [estimatedOutput, setEstimatedOutput] = useState<string | null>(null);
   const [fetchingPrice, setFetchingPrice] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [inviteAddress, setInviteAddress] = useState("");
 
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportCategory, setReportCategory] = useState("");
@@ -276,8 +272,8 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
       setReleaseTxHash(hash);
 
       try {
-        await releaseEscrow(job.id, publicKey, hash);
-        const refreshedJob = await fetchJob(job.id);
+        await releaseEscrow(job.id, publicKey, hash, releaseCurrency);
+        const refreshedJob = await fetchJob(id as string);
         setJob(refreshedJob);
         setReleaseSuccess(true);
         setReleaseSyncedWithBackend(true);
@@ -556,6 +552,41 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               ))}
             </div>
           </div>
+        )}
+
+        {isClient && job.visibility === "invite_only" && (
+          <div className="card mb-6">
+            <h3 className="font-display text-lg font-semibold text-amber-100 mb-3">Invite Freelancer</h3>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input
+                value={inviteAddress}
+                onChange={(e) => setInviteAddress(e.target.value)}
+                className="input-field flex-1"
+                placeholder="Freelancer public key"
+              />
+              <button
+                className="btn-primary text-sm"
+                onClick={async () => {
+                  if (!inviteAddress.trim()) return;
+                  await inviteFreelancer(job.id, inviteAddress.trim());
+                  setInviteAddress("");
+                  setActionError("Invitation sent");
+                }}
+              >
+                Send Invite
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showComparison && (
+          <ProposalComparison
+            applications={selectedApps}
+            job={job}
+            publicKey={publicKey}
+            onClose={() => setShowComparison(false)}
+            onAccept={handleAcceptApplication}
+          />
         )}
 
         {!isClient && job.status === "open" && (
