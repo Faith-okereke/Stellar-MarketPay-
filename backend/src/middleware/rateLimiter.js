@@ -4,8 +4,6 @@ const rateLimit = require("express-rate-limit");
 
 /**
  * Factory function to create reusable rate limiters
- * @param {number} maxRequests - max requests allowed
- * @param {number} windowMinutes - time window in minutes
  */
 const createRateLimiter = (maxRequests, windowMinutes) => {
   return rateLimit({

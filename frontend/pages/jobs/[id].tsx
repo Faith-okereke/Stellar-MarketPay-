@@ -9,7 +9,6 @@ import Head from "next/head";
 import clsx from "clsx";
 
 import ApplicationForm from "@/components/ApplicationForm";
-import FreelancerTierBadge from "@/components/FreelancerTierBadge";
 import WalletConnect from "@/components/WalletConnect";
 import RatingForm from "@/components/RatingForm";
 import ShareJobModal from "@/components/ShareJobModal";
@@ -27,7 +26,6 @@ import {
   accountUrl,
   buildReleaseEscrowTransaction,
   buildReleaseWithConversionTransaction,
-  explorerUrl,
   getPathPaymentPrice,
   submitSignedSorobanTransaction,
   USDC_ISSUER,
@@ -36,19 +34,15 @@ import {
 } from "@/lib/stellar";
 import { Asset } from "@stellar/stellar-sdk";
 import { signTransactionWithWallet } from "@/lib/wallet";
-import type { Application, AvailabilityStatus, Job, UserProfile } from "@/utils/types";
-import clsx from "clsx";
+import type { Application, Job } from "@/utils/types";
 
 interface JobDetailProps {
   publicKey: string | null;
   onConnect: (pk: string) => void;
 }
 
-function getAvailabilityBadgeClass(status?: AvailabilityStatus | null) {
-  if (status === "available") return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-  if (status === "busy") return "bg-amber-500/10 text-amber-300 border-amber-500/20";
-  if (status === "unavailable") return "bg-red-500/10 text-red-400 border-red-500/20";
-  return "bg-market-500/10 text-market-400 border-market-500/20";
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
 function availabilityStatusLabel(status?: AvailabilityStatus | null) {
@@ -82,14 +76,25 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [prefillData, setPrefillData] = useState<any>(null);
-  const [aiScores, setAiScores] = useState<Record<string, { score: number; reasoning: string }>>({});
-  const [scoringProposals, setScoringProposals] = useState(false);
 
   const [releaseCurrency, setReleaseCurrency] = useState<"XLM" | "USDC">("XLM");
   const [estimatedOutput, setEstimatedOutput] = useState<string | null>(null);
   const [fetchingPrice, setFetchingPrice] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [inviteAddress, setInviteAddress] = useState("");
+
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportCategory, setReportCategory] = useState("");
+  const [reportDescription, setReportDescription] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportSuccess, setReportSuccess] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  const isClient = Boolean(publicKey && job?.clientAddress === publicKey);
+  const isFreelancer = Boolean(publicKey && job?.freelancerAddress === publicKey);
+  const hasApplied = applications.some(
+    (application) => application.freelancerAddress === publicKey
+  );
 
   const handleCopyJobLink = async () => {
     const ok = await copyToClipboard(window.location.href);
@@ -103,7 +108,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const hasApplied = applications.some((application) => application.freelancerAddress === publicKey);
 
   useEffect(() => {
-    if (job?.currency) setReleaseCurrency(job.currency as any);
+    if (job?.currency) setReleaseCurrency(job.currency as "XLM" | "USDC");
   }, [job?.currency]);
 
   useEffect(() => {
@@ -113,12 +118,18 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     }
 
     let cancelled = false;
+
     const fetchPrice = async () => {
       setFetchingPrice(true);
+
       try {
-        const sourceAsset = job.currency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
-        const destAsset = releaseCurrency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
+        const sourceAsset =
+          job.currency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
+        const destAsset =
+          releaseCurrency === "XLM" ? Asset.native() : new Asset("USDC", USDC_ISSUER);
+
         const res = await getPathPaymentPrice(sourceAsset, job.budget, destAsset);
+
         if (!cancelled && res) {
           setEstimatedOutput(res.amount);
         }
@@ -130,8 +141,11 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     };
 
     fetchPrice();
-    return () => { cancelled = true; };
-  }, [releaseCurrency, job?.budget, job?.currency]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [releaseCurrency, job]);
 
   useEffect(() => {
     if (!id) return;
@@ -253,41 +267,6 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     }
   };
 
-  const handleToggleSelection = (appId: string) => {
-    setSelectedApplications((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(appId)) {
-        newSet.delete(appId);
-      } else if (newSet.size < 3) {
-        newSet.add(appId);
-      }
-      return newSet;
-    });
-  };
-
-  const handleClearSelection = () => {
-    setSelectedApplications(new Set());
-  };
-
-  const selectedApps = applications.filter((app) => selectedApplications.has(app.id));
-
-  const handleScoreProposals = async () => {
-    if (!id) return;
-    setScoringProposals(true);
-    try {
-      const scores = await scoreProposals(id as string);
-      const scoreMap = scores.reduce((accumulator, current) => {
-        accumulator[current.id] = { score: current.score, reasoning: current.reasoning };
-        return accumulator;
-      }, {} as Record<string, { score: number; reasoning: string }>);
-      setAiScores(scoreMap);
-    } catch (error) {
-      console.error("Scoring error:", error);
-    } finally {
-      setScoringProposals(false);
-    }
-  };
-
   const handleReleaseEscrow = async () => {
     if (!publicKey || !job || !id) return;
 
@@ -303,12 +282,19 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
     try {
       let prepared;
+
       if (releaseCurrency !== job.currency && estimatedOutput) {
-        // Issue #104: Release with conversion
-        const targetTokenAddress = releaseCurrency === "XLM" ? XLM_SAC_ADDRESS : USDC_SAC_ADDRESS;
-        // Apply 1% slippage protection (destMin = estimatedOutput * 0.99)
-        const minAmountOut = BigInt(Math.round(parseFloat(estimatedOutput) * 0.99 * (releaseCurrency === "XLM" ? 10_000_000 : 1_000_000)));
-        
+        const targetTokenAddress =
+          releaseCurrency === "XLM" ? XLM_SAC_ADDRESS : USDC_SAC_ADDRESS;
+
+        const minAmountOut = BigInt(
+          Math.round(
+            parseFloat(estimatedOutput) *
+              0.99 *
+              (releaseCurrency === "XLM" ? 10_000_000 : 1_000_000)
+          )
+        );
+
         prepared = await buildReleaseWithConversionTransaction(
           job.escrowContractId,
           job.id,
@@ -317,7 +303,11 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
           minAmountOut
         );
       } else {
-        prepared = await buildReleaseEscrowTransaction(job.escrowContractId, job.id, publicKey);
+        prepared = await buildReleaseEscrowTransaction(
+          job.escrowContractId,
+          job.id,
+          publicKey
+        );
       }
 
       const { signedXDR, error: signError } = await signTransactionWithWallet(prepared.toXDR());
@@ -348,6 +338,53 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     }
   };
 
+  const handleSubmitReport = async () => {
+    if (!job) return;
+
+    if (!publicKey) {
+      setReportError("Please connect your wallet before reporting this job.");
+      return;
+    }
+
+    if (!reportCategory) {
+      setReportError("Please select a report category.");
+      return;
+    }
+
+    setReportLoading(true);
+    setReportError(null);
+
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/report`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reporterAddress: publicKey,
+          category: reportCategory,
+          description: reportDescription,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to submit report.");
+      }
+
+      setReportSuccess(true);
+      setReportCategory("");
+      setReportDescription("");
+    } catch (error: unknown) {
+      setReportError(
+        error instanceof Error ? error.message : "Failed to submit report."
+      );
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
@@ -370,12 +407,18 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
         <title>{job.title} - Stellar MarketPay</title>
         <meta name="description" content={job.description.substring(0, 160)} />
         <meta property="og:title" content={job.title} />
-        <meta property="og:description" content={job.description.substring(0, 160)} />
+        <meta
+          property="og:description"
+          content={job.description.substring(0, 160)}
+        />
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content="Stellar MarketPay" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={job.title} />
-        <meta name="twitter:description" content={job.description.substring(0, 160)} />
+        <meta
+          name="twitter:description"
+          content={job.description.substring(0, 160)}
+        />
       </Head>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
@@ -390,37 +433,27 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
           <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-5">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className={statusClass(job.status)}>{statusLabel(job.status)}</span>
+                <span className={statusClass(job.status)}>
+                  {statusLabel(job.status)}
+                </span>
+
                 <span className="text-xs text-amber-800 bg-ink-700 px-2.5 py-1 rounded-full border border-market-500/10">
                   {job.category}
                 </span>
+
                 {job.boosted && new Date(job.boostedUntil || "") > new Date() && (
                   <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
                     Featured
                   </span>
                 )}
-                {/* Copy link button (Issue #149) */}
+
                 <button
                   type="button"
                   onClick={handleCopyJobLink}
                   aria-label="Copy job link"
                   className="btn-ghost inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full"
                 >
-                  {linkCopied ? (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      Copied!
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 015.656 0l1.415 1.415a4 4 0 010 5.656l-3 3a4 4 0 01-5.656 0l-1.415-1.415m-2.828-2.828a4 4 0 010-5.656l3-3a4 4 0 015.656 0l1.415 1.415" />
-                      </svg>
-                      Copy link
-                    </>
-                  )}
+                  {linkCopied ? "Copied!" : "Copy link"}
                 </button>
               </div>
 
@@ -436,7 +469,9 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               </p>
 
               {job.deadline && (
-                <p className="text-xs text-amber-700 mt-2">Deadline: {formatDate(job.deadline)}</p>
+                <p className="text-xs text-amber-700 mt-2">
+                  Deadline: {formatDate(job.deadline)}
+                </p>
               )}
 
               <a
@@ -451,7 +486,10 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
           </div>
 
           <div className="prose prose-sm max-w-none">
-            <h3 className="font-display text-base font-semibold text-amber-300 mb-3">Description</h3>
+            <h3 className="font-display text-base font-semibold text-amber-300 mb-3">
+              Description
+            </h3>
+
             <p className="text-amber-700/90 leading-relaxed whitespace-pre-wrap font-body text-sm">
               {job.description}
             </p>
@@ -585,8 +623,25 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
                       </div>
                     )}
                   </div>
-                );
-              })}
+
+                  <p className="text-xs text-amber-800 mb-3">
+                    Applied {timeAgo(application.createdAt)}
+                  </p>
+
+                  <p className="text-amber-700/80 text-sm leading-relaxed">
+                    {application.proposal}
+                  </p>
+
+                  {application.status === "pending" && job.status === "open" && (
+                    <button
+                      onClick={() => handleAcceptApplication(application.id)}
+                      className="btn-secondary text-sm py-2 px-4 mt-4"
+                    >
+                      Accept Proposal
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -637,8 +692,12 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               </div>
             ) : hasApplied ? (
               <div className="card text-center py-8 border-market-500/20">
-                <p className="text-market-400 font-medium mb-1">Application submitted</p>
-                <p className="text-amber-800 text-sm">The client will review your proposal shortly.</p>
+                <p className="text-market-400 font-medium mb-1">
+                  Application submitted
+                </p>
+                <p className="text-amber-800 text-sm">
+                  The client will review your proposal shortly.
+                </p>
               </div>
             ) : showApplyForm ? (
               <ApplicationForm
@@ -652,13 +711,18 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               />
             ) : (
               <div className="text-center">
-                <button onClick={() => setShowApplyForm(true)} className="btn-primary text-base px-10 py-3.5">
+                <button
+                  onClick={() => setShowApplyForm(true)}
+                  className="btn-primary text-base px-10 py-3.5"
+                >
                   Apply for this Job
                 </button>
               </div>
             )}
 
-            {actionError && <p className="mt-3 text-red-400 text-sm">{actionError}</p>}
+            {actionError && (
+              <p className="mt-3 text-red-400 text-sm">{actionError}</p>
+            )}
           </div>
         )}
 
@@ -767,190 +831,104 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
         </div>
       )}
 
-      {/* Invoice generation (for completed jobs) - Issue #83 */}
-      {job.status === "completed" && isFreelancer && (
-        <div className="mt-6 card">
-          <h3 className="font-display text-lg font-bold text-amber-100 mb-4">Invoice</h3>
-          <p className="text-amber-800 text-sm mb-4">
-            Generate a professional PDF invoice for your accounting records.
-          </p>
-          <button
-            onClick={() => {
-              // Generate invoice
-              const invoiceNumber = `INV-${job.id.substring(0, 8).toUpperCase()}-${Date.now()}`;
-              const invoiceHTML = `
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                  <meta charset="UTF-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                  <title>Invoice</title>
-                  <style>
-                    body {
-                      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                      padding: 40px;
-                      background: #f5f5f5;
-                    }
-                    .invoice-container {
-                      background: white;
-                      padding: 40px;
-                      max-width: 800px;
-                      margin: 0 auto;
-                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    }
-                    .invoice-header {
-                      display: flex;
-                      justify-content: space-between;
-                      margin-bottom: 40px;
-                      border-bottom: 2px solid #e0e0e0;
-                      padding-bottom: 20px;
-                    }
-                    .invoice-title {
-                      font-size: 32px;
-                      font-weight: bold;
-                      color: #333;
-                    }
-                    .invoice-number {
-                      text-align: right;
-                      color: #666;
-                    }
-                    .invoice-number div {
-                      margin: 5px 0;
-                    }
-                    .section {
-                      margin-bottom: 30px;
-                    }
-                    .section-title {
-                      font-weight: bold;
-                      color: #333;
-                      margin-bottom: 10px;
-                    }
-                    .section-content {
-                      color: #666;
-                      line-height: 1.6;
-                    }
-                    .job-details {
-                      background: #f9f9f9;
-                      padding: 20px;
-                      border-radius: 4px;
-                      margin-bottom: 30px;
-                    }
-                    .detail-row {
-                      display: flex;
-                      justify-content: space-between;
-                      margin: 10px 0;
-                      color: #333;
-                    }
-                    .detail-label {
-                      font-weight: 500;
-                    }
-                    .amount-row {
-                      display: flex;
-                      justify-content: space-between;
-                      font-size: 18px;
-                      font-weight: bold;
-                      border-top: 2px solid #e0e0e0;
-                      padding-top: 15px;
-                      margin-top: 15px;
-                      color: #333;
-                    }
-                    .footer {
-                      margin-top: 40px;
-                      padding-top: 20px;
-                      border-top: 1px solid #e0e0e0;
-                      font-size: 12px;
-                      color: #999;
-                      text-align: center;
-                    }
-                    @media print {
-                      body { background: white; padding: 0; }
-                      .invoice-container { box-shadow: none; }
-                    }
-                  </style>
-                </head>
-                <body>
-                  <div class="invoice-container">
-                    <div class="invoice-header">
-                      <div class="invoice-title">INVOICE</div>
-                      <div class="invoice-number">
-                        <div><strong>${invoiceNumber}</strong></div>
-                        <div>Date: ${formatDate(new Date().toISOString())}</div>
-                        <div>Job ID: ${job.id}</div>
-                      </div>
-                    </div>
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-market-500/20 bg-ink-900 p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="font-display text-xl font-bold text-amber-100">
+                  Report this job
+                </h2>
+                <p className="text-xs text-amber-800 mt-1">
+                  Help keep suspicious or fraudulent jobs off the platform.
+                </p>
+              </div>
 
-                    <div class="section">
-                      <div class="section-title">Bill To (Client)</div>
-                      <div class="section-content">
-                        <div>${job.clientAddress}</div>
-                        <div style="margin-top: 10px; font-size: 12px; color: #999;">
-                          Network: Stellar Testnet
-                        </div>
-                      </div>
-                    </div>
+              <button
+                onClick={() => setShowReportModal(false)}
+                className="text-amber-800 hover:text-amber-300"
+                aria-label="Close report modal"
+              >
+                ✕
+              </button>
+            </div>
 
-                    <div class="section">
-                      <div class="section-title">From (Freelancer)</div>
-                      <div class="section-content">
-                        <div>${publicKey}</div>
-                        <div style="margin-top: 10px; font-size: 12px; color: #999;">
-                          Network: Stellar Testnet
-                        </div>
-                      </div>
-                    </div>
+            {reportSuccess ? (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+                <p className="text-emerald-400 font-medium">
+                  Thank you for your report.
+                </p>
+                <p className="text-xs text-amber-700 mt-1">
+                  The team will review this job listing.
+                </p>
 
-                    <div class="job-details">
-                      <div class="detail-row">
-                        <span class="detail-label">Job Title:</span>
-                        <span>${job.title}</span>
-                      </div>
-                      <div class="detail-row">
-                        <span class="detail-label">Description:</span>
-                        <span>${job.description?.substring(0, 50)}...</span>
-                      </div>
-                      <div class="detail-row">
-                        <span class="detail-label">Amount:</span>
-                        <span>${formatXLM(job.budget || '0')}</span>
-                      </div>
-                      <div class="detail-row">
-                        <span class="detail-label">Completion Date:</span>
-                        <span>${formatDate(new Date().toISOString())}</span>
-                      </div>
-                      <div class="amount-row">
-                        <span>Total Due:</span>
-                        <span>${formatXLM(job.budget || '0')}</span>
-                      </div>
-                    </div>
+                <button
+                  onClick={() => setShowReportModal(false)}
+                  className="btn-primary w-full mt-4"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <>
+                <label className="block text-sm text-amber-300 mb-2">
+                  Report category
+                </label>
 
-                    <div class="footer">
-                      <p>This is an automated invoice generated by Stellar MarketPay</p>
-                      <p>For support, visit https://stellar-marketpay.app</p>
-                    </div>
-                  </div>
-                </body>
-                </html>
-              `;
+                <select
+                  value={reportCategory}
+                  onChange={(event) => setReportCategory(event.target.value)}
+                  className="w-full rounded-lg border border-market-500/20 bg-ink-800 px-3 py-2 text-sm text-amber-100 outline-none focus:border-market-400"
+                >
+                  <option value="">Select a category</option>
+                  <option value="fraud">Fraud or scam</option>
+                  <option value="suspicious">Suspicious listing</option>
+                  <option value="spam">Spam</option>
+                  <option value="inappropriate">Inappropriate content</option>
+                  <option value="other">Other</option>
+                </select>
 
-              // Open print dialog
-              const printWindow = window.open('', '', 'height=600,width=800');
-              if (printWindow) {
-                printWindow.document.write(invoiceHTML);
-                printWindow.document.close();
-                printWindow.print();
-              }
-            }}
-            className="btn-primary py-2 px-4 text-sm"
-          >
-            Generate Invoice & Print
-          </button>
+                <label className="block text-sm text-amber-300 mt-4 mb-2">
+                  Description optional
+                </label>
+
+                <textarea
+                  value={reportDescription}
+                  onChange={(event) => setReportDescription(event.target.value)}
+                  rows={4}
+                  placeholder="Add extra details..."
+                  className="w-full rounded-lg border border-market-500/20 bg-ink-800 px-3 py-2 text-sm text-amber-100 outline-none focus:border-market-400"
+                />
+
+                {reportError && (
+                  <p className="mt-3 text-sm text-red-400">{reportError}</p>
+                )}
+
+                <div className="mt-5 flex gap-3">
+                  <button
+                    onClick={() => setShowReportModal(false)}
+                    className="btn-secondary flex-1"
+                    disabled={reportLoading}
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    onClick={handleSubmitReport}
+                    className="btn-primary flex-1"
+                    disabled={reportLoading}
+                  >
+                    {reportLoading ? "Submitting..." : "Submit Report"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
       {showShareModal && job && (
-        <ShareJobModal
-          job={job}
-          onClose={() => setShowShareModal(false)}
-        />
+        <ShareJobModal job={job} onClose={() => setShowShareModal(false)} />
       )}
     </>
   );

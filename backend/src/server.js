@@ -4,17 +4,15 @@
  */
 "use strict";
 
-const express     = require("express");
-const cors        = require("cors");
-const helmet      = require("helmet");
-const morgan      = require("morgan");
-const rateLimit   = require("express-rate-limit");
-const http        = require("http");
-const { WebSocketServer } = require("ws");
-const nodemailer  = require("nodemailer");
 require("dotenv").config();
 
-const jobRoutes         = require("./routes/jobs");
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const morgan = require("morgan");
+const rateLimit = require("express-rate-limit");
+
+const jobRoutes = require("./routes/jobs");
 const applicationRoutes = require("./routes/applications");
 const profileRoutes     = require("./routes/profiles");
 const escrowRoutes      = require("./routes/escrow");
@@ -120,7 +118,7 @@ const priceAlertService = new PriceAlertService({
 app.locals.indexerService = indexerService;
 app.locals.broadcastRealtime = broadcastRealtime;
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
+// Middleware
 app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "20kb" }));
@@ -154,11 +152,12 @@ app.get("/api/indexer/health", (req, res) => {
   });
 });
 
-// ─── Error handling ───────────────────────────────────────────────────────────
-app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
-app.use((err, req, res) => {
+app.use((err, req, res, next) => {
   console.error("[Error]", err.message);
-  res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+
+  res.status(err.status || 500).json({
+    error: err.message || "Internal server error",
+  });
 });
 
 const wsServer = new WebSocketServer({ noServer: true });
