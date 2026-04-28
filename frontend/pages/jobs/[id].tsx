@@ -1,11 +1,13 @@
 /**
  * pages/jobs/[id].tsx
- * Single job detail page — view description, apply, manage as client, share, rate, and report.
+ * Single job detail page — view description, apply, manage as client, and see related jobs.
  */
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import Head from "next/head";
+import clsx from "clsx";
+
 import ApplicationForm from "@/components/ApplicationForm";
 import WalletConnect from "@/components/WalletConnect";
 import RatingForm from "@/components/RatingForm";
@@ -43,12 +45,27 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function availabilityStatusLabel(status?: AvailabilityStatus | null) {
+  if (status === "available") return "Available";
+  if (status === "busy") return "Busy";
+  if (status === "unavailable") return "Unavailable";
+  return "Not set";
+}
+
+function availabilitySummary(availability?: UserProfile["availability"]) {
+  if (!availability) return "";
+  return availability.note || availability.hoursPerWeek ? `${availability.hoursPerWeek || 0} hrs/week` : "";
+}
+
 export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const router = useRouter();
   const { id } = router.query;
 
   const [job, setJob] = useState<Job | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [applicantProfiles, setApplicantProfiles] = useState<Record<string, UserProfile>>({});
+  const [relatedJobs, setRelatedJobs] = useState<Job[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [showApplyForm, setShowApplyForm] = useState(false);
   const [releasingEscrow, setReleasingEscrow] = useState(false);
@@ -85,6 +102,10 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
   };
+
+  const isClient = Boolean(publicKey && job?.clientAddress === publicKey);
+  const isFreelancer = Boolean(publicKey && job?.freelancerAddress === publicKey);
+  const hasApplied = applications.some((application) => application.freelancerAddress === publicKey);
 
   useEffect(() => {
     if (job?.currency) setReleaseCurrency(job.currency as "XLM" | "USDC");
@@ -130,26 +151,54 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     if (!id) return;
 
     const { prefill } = router.query;
-
     if (typeof prefill === "string") {
       try {
-        const decoded = JSON.parse(
-          Buffer.from(prefill, "base64").toString("utf8")
-        );
+        const decoded = JSON.parse(Buffer.from(prefill, "base64").toString("utf8"));
         setPrefillData(decoded);
       } catch {
         setPrefillData(null);
       }
     }
 
+    setLoading(true);
+
     Promise.all([fetchJob(id as string), fetchApplications(id as string)])
-      .then(([j, apps]) => {
-        setJob(j);
-        setApplications(apps);
+      .then(([jobData, applicationData]) => {
+        setJob(jobData);
+        setApplications(applicationData);
       })
+    Promise.all([
+      fetchJob(id as string, publicKey || undefined),
+      fetchApplications(id as string),
+    ])
+      .then(([j, apps]) => { setJob(j); setApplications(apps); })
       .catch(() => router.push("/jobs"))
       .finally(() => setLoading(false));
-  }, [id, router, router.isReady]);
+  }, [id, router.isReady]);
+
+  useEffect(() => {
+    if (!job) return;
+
+    let cancelled = false;
+
+    fetchJobs()
+      .then((jobs: Job[]) => {
+        if (cancelled) return;
+
+        const similarJobs = jobs
+          .filter((item) => item.id !== job.id)
+          .filter((item) => item.status === "open")
+          .filter((item) => item.category === job.category)
+          .slice(0, 3);
+
+        setRelatedJobs(similarJobs);
+      })
+      .catch(() => setRelatedJobs([]));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [job]);
 
 
   useEffect(() => {
@@ -173,7 +222,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
     let cancelled = false;
 
-    (async () => {
+    async function loadProfiles() {
       const profileEntries = await Promise.all(
         applications.map(async (application) => {
           try {
@@ -187,13 +236,15 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
       if (cancelled) return;
 
-      const nextProfiles = profileEntries.reduce<Record<string, UserProfile>>((accumulator, entry) => {
-        if (entry) accumulator[entry[0]] = entry[1];
-        return accumulator;
+      const nextProfiles = profileEntries.reduce<Record<string, UserProfile>>((acc, entry) => {
+        if (entry) acc[entry[0]] = entry[1];
+        return acc;
       }, {});
 
       setApplicantProfiles(nextProfiles);
-    })();
+    }
+
+    loadProfiles();
 
     return () => {
       cancelled = true;
@@ -205,19 +256,19 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
 
     try {
       await acceptApplication(applicationId, publicKey);
-      const [j, apps] = await Promise.all([
+      const [jobData, applicationData] = await Promise.all([
         fetchJob(id as string),
         fetchApplications(id as string),
       ]);
-      setJob(j);
-      setApplications(apps);
+      setJob(jobData);
+      setApplications(applicationData);
     } catch {
       setActionError("Failed to accept application.");
     }
   };
 
   const handleReleaseEscrow = async () => {
-    if (!publicKey || !job) return;
+    if (!publicKey || !job || !id) return;
 
     if (!job.escrowContractId) {
       setActionError("This job has no escrow contract ID.");
@@ -259,9 +310,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
         );
       }
 
-      const { signedXDR, error: signError } = await signTransactionWithWallet(
-        prepared.toXDR()
-      );
+      const { signedXDR, error: signError } = await signTransactionWithWallet(prepared.toXDR());
 
       if (signError || !signedXDR) {
         setActionError(signError || "Signing was cancelled.");
@@ -278,18 +327,12 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
         setReleaseSuccess(true);
         setReleaseSyncedWithBackend(true);
       } catch {
-        setActionError(
-          "Payment was released on-chain, but the backend status could not be updated."
-        );
+        setActionError("Payment was released on-chain, but the app could not update your job status.");
         setReleaseSuccess(true);
         setReleaseSyncedWithBackend(false);
       }
     } catch (error: unknown) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Could not complete the release. Please try again."
-      );
+      setActionError(error instanceof Error ? error.message : "Could not complete the release.");
     } finally {
       setReleasingEscrow(false);
     }
@@ -452,32 +495,11 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
             </p>
           </div>
 
-          <div className="mt-4 flex justify-between items-center gap-3">
-            <button
-              onClick={() => setShowShareModal(true)}
-              className="text-xs text-market-400 hover:text-market-300 underline"
-            >
-              Share job
-            </button>
-
-            <button
-              onClick={() => {
-                setShowReportModal(true);
-                setReportSuccess(false);
-                setReportError(null);
-              }}
-              className="text-xs text-red-400 hover:text-red-300 underline"
-            >
-              Report this job
-            </button>
-          </div>
-
           {job.skills?.length > 0 && (
             <div className="mt-5">
               <h3 className="font-display text-base font-semibold text-amber-300 mb-3">
                 Required Skills
               </h3>
-
               <div className="flex flex-wrap gap-2">
                 {job.skills.map((skill) => (
                   <span
@@ -490,7 +512,20 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
               </div>
             </div>
           )}
-        </div>
+
+        {isClient && applications.length > 0 && (
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-xl font-bold text-amber-100">
+                Applications ({applications.length})
+              </h2>
+              <div className="hidden sm:flex items-center gap-3 text-[10px] text-amber-800 font-medium uppercase tracking-wider">
+                <span className="flex items-center gap-1"><kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">↑↓</kbd> Navigate</span>
+                <span className="flex items-center gap-1"><kbd className="bg-ink-900 px-1.5 py-0.5 rounded border border-market-500/20 text-market-400">Enter</kbd> Accept</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {isClient && applications.length > 0 && (
           <div className="mb-6">
@@ -499,37 +534,94 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
             </h2>
 
             <div className="space-y-4">
-              {applications.map((application) => (
-                <div key={application.id} className="card">
-                  <div className="flex items-start justify-between gap-4 mb-3">
-                    <a
-                      href={accountUrl(application.freelancerAddress)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="address-tag hover:border-market-500/40 transition-colors"
-                    >
-                      {shortenAddress(application.freelancerAddress)} ↗
-                    </a>
+              {applications.map((app) => {
+                const applicantProfile = applicantProfiles[app.freelancerAddress];
+                const availability = applicantProfile?.availability;
 
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-market-400 font-semibold text-sm">
-                        {formatXLM(application.bidAmount)}
-                      </span>
+                return (
+                  <div key={application.id} className="card">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div>
+                        <a
+                          href={accountUrl(application.freelancerAddress)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="address-tag hover:border-market-500/40 transition-colors"
+                        >
+                          {shortenAddress(application.freelancerAddress)} ↗
+                        </a>
 
-                      <span
-                        className={cx(
-                          "text-xs px-2.5 py-1 rounded-full border",
-                          application.status === "accepted" &&
-                            "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-                          application.status === "rejected" &&
-                            "bg-red-500/10 text-red-400 border-red-500/20",
-                          application.status === "pending" &&
-                            "bg-market-500/10 text-market-400 border-market-500/20"
+                        <div className="mt-3">
+                          <span
+                            className={clsx(
+                              "text-xs px-2.5 py-1 rounded-full border",
+                              getAvailabilityBadgeClass(availability?.status)
+                            )}
+                          >
+                            {availabilityStatusLabel(availability?.status)}
+                          </span>
+
+                          <p className="text-xs text-amber-800 mt-2">
+                            {availabilitySummary(availability) || "Availability has not been set yet."}
+                          </p>
+                        </div>
+                        <p className="text-xs text-amber-800 mt-2">
+                          Applied {timeAgo(app.createdAt)}
+                        </p>
+                        {availability && (
+                          <div className="mt-3">
+                            <span
+                              className={clsx(
+                                "text-xs px-2.5 py-1 rounded-full border",
+                                getAvailabilityBadgeClass(availability?.status)
+                              )}
+                            >
+                              {availabilityStatusLabel(availability?.status)}
+                            </span>
+                            <p className="text-xs text-amber-800 mt-2">
+                              {availabilitySummary(availability) || "Availability has not been set yet."}
+                            </p>
+                          </div>
                         )}
-                      >
-                        {application.status}
-                      </span>
+                      </div>
+
+                      <div className="flex-shrink-0 flex items-center gap-3 sm:flex-col sm:items-end sm:gap-2">
+                        <span className="font-mono text-market-400 font-semibold text-sm">
+                          {formatXLM(app.bidAmount)}
+                        </span>
+
+                        <span
+                          className={clsx(
+                            "text-xs px-2.5 py-1 rounded-full border",
+                            app.status === "accepted"
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              : app.status === "rejected"
+                                ? "bg-red-500/10 text-red-400 border-red-500/20"
+                                : "bg-market-500/10 text-market-400 border-market-500/20"
+                          )}
+                        >
+                          {app.status}
+                        </span>
+                      </div>
                     </div>
+
+                    <p className="text-amber-700/80 text-sm leading-relaxed mb-4">
+                      {application.proposal}
+                    </p>
+
+                    {app.status === "pending" && job.status === "open" && (
+                      <div className="flex gap-3 mt-4 pt-4 border-t border-market-500/10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+                        <button
+                          onClick={() => handleAcceptApplication(app.id)}
+                          className="btn-primary text-sm py-2 px-4"
+                        >
+                          Accept
+                        </button>
+                        <button className="btn-ghost text-sm py-2 px-4 text-red-400/70 hover:text-red-400 hover:bg-red-500/8">
+                          Reject
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <p className="text-xs text-amber-800 mb-3">
@@ -634,73 +726,35 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
           </div>
         )}
 
-        {isClient &&
-          job.status === "in_progress" &&
-          job.freelancerAddress &&
-          job.escrowContractId && (
-            <div className="card mb-6">
-              <h3 className="font-display text-lg font-bold text-amber-100 mb-2">
-                Release Escrow
-              </h3>
+        {isClient && job.status === "in_progress" && (
+          <div className="card mb-6">
+            <h2 className="font-display text-xl font-bold text-amber-100 mb-3">Escrow Payment</h2>
 
-              <p className="text-amber-800 text-sm mb-4">
-                Release the locked payment to the selected freelancer.
-              </p>
-
-              <div className="mb-4">
-                <label className="block text-sm text-amber-300 mb-2">
-                  Release currency
-                </label>
-
-                <select
-                  value={releaseCurrency}
-                  onChange={(event) =>
-                    setReleaseCurrency(event.target.value as "XLM" | "USDC")
-                  }
-                  className="w-full rounded-lg border border-market-500/20 bg-ink-800 px-3 py-2 text-sm text-amber-100 outline-none focus:border-market-400"
-                >
-                  <option value="XLM">XLM</option>
-                  <option value="USDC">USDC</option>
-                </select>
-
-                {fetchingPrice && (
-                  <p className="mt-2 text-xs text-amber-700">
-                    Fetching estimated conversion...
-                  </p>
+            {releaseSuccess ? (
+              <div>
+                <p className="text-market-400 font-medium">Payment released successfully.</p>
+                {releaseTxHash && (
+                  <p className="text-sm text-amber-700 mt-2 break-all">Transaction: {releaseTxHash}</p>
                 )}
-
-                {estimatedOutput && releaseCurrency !== job.currency && (
-                  <p className="mt-2 text-xs text-amber-700">
-                    Estimated output: {estimatedOutput} {releaseCurrency}
+                {!releaseSyncedWithBackend && (
+                  <p className="text-sm text-red-400 mt-2">
+                    Backend sync failed. Save the transaction hash.
                   </p>
                 )}
               </div>
-
+            ) : (
               <button
                 onClick={handleReleaseEscrow}
                 disabled={releasingEscrow}
-                className="btn-primary"
+                className="btn-primary text-sm py-2 px-4 disabled:opacity-60"
               >
-                {releasingEscrow ? "Releasing..." : "Release Payment"}
+                {releasingEscrow ? "Releasing..." : "Release Escrow"}
               </button>
+            )}
+          </div>
+        )}
 
-              {releaseTxHash && (
-                <p className="mt-2 text-amber-700 text-xs break-all">
-                  Transaction hash: {releaseTxHash}
-                </p>
-              )}
-
-              {releaseSuccess && !releaseSyncedWithBackend && (
-                <p className="mt-2 text-amber-400 text-xs">
-                  On-chain release succeeded, but backend sync failed.
-                </p>
-              )}
-
-              {actionError && (
-                <p className="mt-3 text-red-400 text-sm">{actionError}</p>
-              )}
-            </div>
-          )}
+        {actionError && <p className="mb-6 text-red-400 text-sm">{actionError}</p>}
 
         {job.status === "completed" && publicKey && !ratingSubmitted && (
           <div className="mt-6">
@@ -723,7 +777,59 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
             )}
           </div>
         )}
-      </div>
+
+        <div className="card mt-8">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <h2 className="font-display text-xl font-bold text-amber-100">Similar Jobs</h2>
+              <p className="text-sm text-amber-800 mt-1">More open jobs in {job.category}</p>
+            </div>
+
+            <Link
+              href={`/jobs?category=${encodeURIComponent(job.category)}`}
+              className="text-sm text-market-400 hover:text-market-300 transition-colors"
+            >
+              Browse all {job.category} jobs →
+            </Link>
+          </div>
+
+          {relatedJobs.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {relatedJobs.map((relatedJob) => (
+                <Link
+                  key={relatedJob.id}
+                  href={`/jobs/${relatedJob.id}`}
+                  className="block rounded-xl border border-market-500/10 bg-ink-800/60 p-4 hover:border-market-500/30 transition-colors"
+                >
+                  <h3 className="font-display font-semibold text-amber-100 line-clamp-2 mb-3">
+                    {relatedJob.title}
+                  </h3>
+
+                  <div className="space-y-2 text-sm">
+                    <p className="text-amber-700">
+                      Budget:{" "}
+                      <span className="font-mono text-market-400">
+                        {formatXLM(relatedJob.budget)} {relatedJob.currency}
+                      </span>
+                    </p>
+
+                    <p className="text-amber-700">
+                      Applicants:{" "}
+                      <span className="text-amber-300">
+                        {relatedJob.applicationsCount ?? relatedJob.applicantCount ?? 0}
+                      </span>
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-market-500/10 bg-market-500/5 p-5 text-center">
+              <p className="text-sm text-amber-700">No other open jobs found in this category.</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {showReportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
