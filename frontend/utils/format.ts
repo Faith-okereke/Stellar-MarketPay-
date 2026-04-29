@@ -129,43 +129,11 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 export function statusLabel(status: JobStatus): string {
-  return {
-    open: "Open",
-    in_progress: "In Progress",
-    completed: "Completed",
-    cancelled: "Cancelled",
-    expired: "Expired",
-  }[status];
+  return { open: "Open", in_progress: "In Progress", completed: "Completed", cancelled: "Cancelled", disputed: "Disputed" }[status];
 }
 
 export function statusClass(status: JobStatus): string {
-  return {
-    open: "badge-open",
-    in_progress: "badge-progress",
-    completed: "badge-complete",
-    cancelled: "badge-cancelled",
-    expired: "badge-expired",
-  }[status];
-}
-
-export function availabilityStatusLabel(status?: Availability["status"] | null): string {
-  if (status === "available") return "Available";
-  if (status === "busy") return "Busy";
-  if (status === "unavailable") return "Unavailable";
-  return "Not set";
-}
-
-export function availabilitySummary(availability?: Availability | null): string {
-  if (!availability || !availability.status) return "";
-
-  const label = availabilityStatusLabel(availability.status);
-  const from = availability.availableFrom ? formatDeadline(availability.availableFrom) : "";
-  const until = availability.availableUntil ? formatDeadline(availability.availableUntil) : "";
-
-  if (from && until) return `${label} from ${from} to ${until}`;
-  if (from) return `${label} from ${from}`;
-  if (until) return `${label} until ${until}`;
-  return label;
+  return { open: "badge-open", in_progress: "badge-progress", completed: "badge-complete", cancelled: "badge-cancelled", disputed: "badge-disputed" }[status];
 }
 
 export const JOB_CATEGORIES = [

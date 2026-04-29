@@ -62,7 +62,7 @@ const { getTimezoneOffset } = require("date-fns-tz");
  * @property {string|null} nextCursor  Opaque base64 cursor for the next page, or null when exhausted.
  */
 
-const VALID_STATUSES = ["open", "in_progress", "completed", "cancelled"];
+const VALID_STATUSES = ["open", "in_progress", "completed", "cancelled", "disputed"];
 
 const VALID_CATEGORIES = [
   "Smart Contracts",
@@ -145,8 +145,12 @@ function rowToJob(row) {
     deadline: row.deadline,
     timezone: row.timezone,
     screeningQuestions: row.screening_questions || [],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    disputeReason:      row.dispute_reason,
+    disputeDescription: row.dispute_description,
+    disputedBy:         row.disputed_by,
+    disputedAt:         row.disputed_at,
+    createdAt:         row.created_at,
+    updatedAt:         row.updated_at,
   };
 }
 
@@ -553,29 +557,49 @@ async function incrementShareCount(jobId) {
   return rowToJob(rows[0]);
 }
 
-/**
- * Track a referral click for a job.
- */
-async function trackReferral(jobId, referrerAddress, ipAddress) {
-  validatePublicKey(referrerAddress);
-  
-  // Optional: Check if job exists
-  await getJob(jobId);
+async function raiseDispute(jobId, { reason, description, raisedBy }) {
+  const { rows } = await query(
+    `UPDATE jobs 
+     SET status = 'disputed', 
+         dispute_reason = $1, 
+         dispute_description = $2, 
+         disputed_by = $3, 
+         disputed_at = NOW(), 
+         updated_at = NOW() 
+     WHERE id = $4 AND status = 'in_progress'
+     RETURNING *`,
+    [reason, description, raisedBy, jobId]
+  );
 
-  await pool.query(
-    "INSERT INTO referrals (job_id, referrer_address, ip_address) VALUES ($1, $2, $3)",
-    [jobId, referrerAddress, ipAddress || null]
-  );
-  
-  // Increment referral count on profile
-  await pool.query(
-    "UPDATE profiles SET referral_count = referral_count + 1 WHERE public_key = $1",
-    [referrerAddress]
-  );
+  if (!rows.length) {
+    const e = new Error("Job not found or not in progress"); e.status = 404; throw e;
+  }
+
+  return rowToJob(rows[0]);
 }
 
+async function resolveDispute(jobId) {
+  const { rows } = await query(
+    `UPDATE jobs 
+     SET status = 'in_progress', 
+         dispute_reason = NULL, 
+         dispute_description = NULL, 
+         disputed_by = NULL, 
+         disputed_at = NULL, 
+         updated_at = NOW() 
+     WHERE id = $1 AND status = 'disputed'
+     RETURNING *`,
+    [jobId]
+  );
 
-module.exports = {
+  if (!rows.length) {
+    const e = new Error("Job not found or not disputed"); e.status = 404; throw e;
+  }
+
+  return rowToJob(rows[0]);
+}
+
+export default {
   createJob,
   getJob,
   listJobs,
@@ -584,5 +608,6 @@ module.exports = {
   deleteJob,
   boostJob,
   incrementShareCount,
-  trackReferral,
+  raiseDispute,
+  resolveDispute,
 };
