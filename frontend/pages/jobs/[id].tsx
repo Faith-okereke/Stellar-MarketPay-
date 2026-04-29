@@ -33,10 +33,11 @@ import {
   getCurrentLedgerSequence,
   getPathPaymentPrice,
   submitSignedSorobanTransaction,
-  USDC_ISSUER,
   USDC_SAC_ADDRESS,
   XLM_SAC_ADDRESS,
   subscribeToContractEvents,
+  getEscrowState,
+  buildPartialReleaseTransaction,
 } from "@/lib/stellar";
 import { Asset, type Transaction } from "@stellar/stellar-sdk";
 import { signTransactionWithWallet } from "@/lib/wallet";
@@ -77,47 +78,15 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   const [releaseSuccess, setReleaseSuccess] = useState(false);
   const [releaseTxHash, setReleaseTxHash] = useState<string | null>(null);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [prefillData, setPrefillData] = useState<any>(null);
-
-  const [releaseCurrency, setReleaseCurrency] = useState<"XLM" | "USDC">("XLM");
-  const [estimatedOutput, setEstimatedOutput] = useState<string | null>(null);
-  const [fetchingPrice, setFetchingPrice] = useState(false);
-  const [linkCopied, setLinkCopied] = useState(false);
-  const [inviteAddress, setInviteAddress] = useState("");
-
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportCategory, setReportCategory] = useState("");
-  const [reportDescription, setReportDescription] = useState("");
-  const [reportLoading, setReportLoading] = useState(false);
-  const [reportSuccess, setReportSuccess] = useState(false);
-  const [reportError, setReportError] = useState<string | null>(null);
-  const [isLiveSubscriptionActive, setIsLiveSubscriptionActive] = useState(false);
-
-  // Issue #175 — Escrow timeout state
-  const [timeoutLedger, setTimeoutLedger] = useState<number | null>(null);
-  const [currentLedger, setCurrentLedger] = useState<number>(0);
-  const [timeoutCountdown, setTimeoutCountdown] = useState<string | null>(null);
-  const [timeoutRefundLoading, setTimeoutRefundLoading] = useState(false);
-  const [timeoutRefundSuccess, setTimeoutRefundSuccess] = useState(false);
-  const [pendingTimeoutRefund, setPendingTimeoutRefund] = useState<Transaction | null>(null);
-
-  const isClient = Boolean(publicKey && job?.clientAddress === publicKey);
-  const isFreelancer = Boolean(publicKey && job?.freelancerAddress === publicKey);
-  const hasApplied = applications.some(
-    (application) => application.freelancerAddress === publicKey
-  );
-
-  const handleCopyJobLink = async () => {
-    const ok = await copyToClipboard(window.location.href);
-    if (!ok) return;
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
-  };
-
-  const isClient = Boolean(publicKey && job?.clientAddress === publicKey);
-  const isFreelancer = Boolean(publicKey && job?.freelancerAddress === publicKey);
-  const hasApplied = applications.some((application) => application.freelancerAddress === publicKey);
+  
+  const [pendingRelease, setPendingRelease] = useState<{
+    transaction: Transaction;
+    fnName: "release_escrow" | "release_with_conversion";
+  } | null>(null);
+  const [onChainEscrow, setOnChainEscrow] = useState<any>(null);
+  const [loadingEscrow, setLoadingEscrow] = useState(false);
+  const [releasingMilestoneIndex, setReleasingMilestoneIndex] = useState<number | null>(null);
+  const [releaseSyncedWithBackend, setReleaseSyncedWithBackend] = useState(true);
 
   useEffect(() => {
     if (!router.isReady || !jobId) return;
@@ -214,10 +183,20 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     setLoading(true);
 
     Promise.all([fetchJob(jobId), fetchApplications(jobId)])
-      .then(([nextJob, nextApplications]) => {
+      .then(async ([nextJob, nextApplications]) => {
         if (cancelled) return;
         setJob(nextJob);
         setApplications(nextApplications);
+        
+        if (nextJob && (nextJob.status === "in_progress" || nextJob.status === "disputed")) {
+          setLoadingEscrow(true);
+          const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID;
+          if (contractId) {
+            const escrowData = await getEscrowState(contractId, nextJob.id, publicKey || "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
+            setOnChainEscrow(escrowData);
+          }
+          setLoadingEscrow(false);
+        }
       })
       .catch(() => {
         if (!cancelled) router.push("/jobs");
@@ -250,6 +229,16 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
     const [nextJob, nextApplications] = await Promise.all([fetchJob(jobId), fetchApplications(jobId)]);
     setJob(nextJob);
     setApplications(nextApplications);
+    
+    if (nextJob && (nextJob.status === "in_progress" || nextJob.status === "disputed")) {
+      setLoadingEscrow(true);
+      const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID;
+      if (contractId) {
+        const escrowData = await getEscrowState(contractId, nextJob.id, publicKey || "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
+        setOnChainEscrow(escrowData);
+      }
+      setLoadingEscrow(false);
+    }
   };
 
   useEffect(() => {
@@ -305,7 +294,7 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
       }
 
       // Pause for fee confirmation (Issue #222) before Freighter prompts.
-      setPendingRelease({ transaction: prepared, fnName });
+      setPendingRelease({ transaction: prepared, fnName: "release_escrow" as any });
     } catch (error: unknown) {
       setActionError(error instanceof Error ? error.message : "Could not complete the release.");
       setReleasingEscrow(false);
@@ -313,10 +302,23 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
   };
 
   const completeReleaseEscrow = async (signedXDR: string) => {
-    if (!publicKey || !job || !id) return;
+    if (!publicKey || !job || !jobId) return;
     try {
       const { hash } = await submitSignedSorobanTransaction(signedXDR);
-      await releaseEscrow(job.id, publicKey, hash);
+      
+      if (releasingMilestoneIndex !== null) {
+        await fetch(`/api/escrow/${job.id}/partial_release`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientAddress: publicKey, contractTxHash: hash, milestoneIndex: releasingMilestoneIndex }),
+        });
+        const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID!;
+        const escrowData = await getEscrowState(contractId, job.id, publicKey);
+        setOnChainEscrow(escrowData);
+        setReleasingMilestoneIndex(null);
+      } else {
+        await releaseEscrow(job.id, publicKey, hash);
+      }
 
       fetchActualFee(hash).then((actual) => {
         if (actual) {
@@ -332,6 +334,23 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
       setActionError(error instanceof Error ? error.message : "Could not release escrow.");
     } finally {
       setReleasingEscrow(false);
+    }
+  };
+  
+  const handlePartialRelease = async (index: number) => {
+    if (!publicKey || !job) return;
+    setActionError(null);
+    setReleasingMilestoneIndex(index);
+    setReleasingEscrow(true);
+    try {
+      const contractId = process.env.NEXT_PUBLIC_CONTRACT_ID;
+      if (!contractId) throw new Error("Contract ID not configured");
+      const tx = await buildPartialReleaseTransaction(contractId, job.id, publicKey, index);
+      setPendingRelease({ transaction: tx, fnName: "release_escrow" as any });
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : String(err));
+      setReleasingEscrow(false);
+      setReleasingMilestoneIndex(null);
     }
   };
 
@@ -640,16 +659,59 @@ export default function JobDetail({ publicKey, onConnect }: JobDetailProps) {
             </div>
           )}
 
-          {isClient && job.status === "in_progress" && (
+          {isClient && (job.status === "in_progress" || job.status === "disputed") && (
             <div className="card mb-6">
-              <h2 className="font-display text-lg font-semibold text-amber-100 mb-3">Client Actions</h2>
-              <button
-                onClick={handleReleaseEscrow}
-                disabled={releasingEscrow}
-                className="btn-primary text-sm py-2.5 px-5"
-              >
-                {releasingEscrow ? "Releasing Escrow..." : "Release Escrow"}
-              </button>
+              <h2 className="font-display text-lg font-semibold text-amber-100 mb-3">Escrow Payment</h2>
+              
+              {loadingEscrow ? (
+                <p className="text-amber-800 text-sm">Loading on-chain escrow state...</p>
+              ) : onChainEscrow && onChainEscrow.milestones && onChainEscrow.milestones.length > 0 ? (
+                <div className="space-y-4">
+                  {JSON.stringify(onChainEscrow.status).includes("Disputed") && (
+                    <div className="bg-red-500/10 border border-red-500/20 rounded p-3 text-sm text-red-400">
+                      Warning: This job is disputed. You can still release completed milestones, but the rest are locked pending resolution.
+                    </div>
+                  )}
+                  {onChainEscrow.milestones.map((ms: any, i: number) => {
+                    const isCompleted = ms.is_completed;
+                    const amount = Number(BigInt(ms.amount)) / (job.currency === "USDC" ? 1_000_000 : 10_000_000);
+                    const isDisputed = !isCompleted && JSON.stringify(onChainEscrow.status).includes("Disputed");
+                    
+                    return (
+                      <div key={i} className={`flex items-center justify-between p-3 rounded border ${isDisputed ? 'border-red-500/30 bg-red-500/5' : 'border-market-500/20 bg-ink-800'}`}>
+                        <div>
+                          <div className="font-medium text-amber-100 flex items-center gap-2">
+                            Milestone {i + 1}
+                            {isDisputed && <span className="text-xs text-red-400 font-bold bg-red-500/10 px-2 py-0.5 rounded">Disputed</span>}
+                          </div>
+                          <div className="text-sm text-amber-800">{amount} {job.currency}</div>
+                        </div>
+                        <div>
+                          {isCompleted ? (
+                            <span className="text-sm text-emerald-400">Released</span>
+                          ) : (
+                            <button
+                              onClick={() => handlePartialRelease(i)}
+                              disabled={releasingEscrow}
+                              className="btn-primary text-sm py-1.5 px-3 disabled:opacity-60"
+                            >
+                              {releasingMilestoneIndex === i ? "Releasing..." : "Release"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <button
+                  onClick={handleReleaseEscrow}
+                  disabled={releasingEscrow}
+                  className="btn-primary text-sm py-2.5 px-5"
+                >
+                  {releasingEscrow ? "Releasing Escrow..." : "Release Escrow"}
+                </button>
+              )}
             </div>
           )}
 
