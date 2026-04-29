@@ -8,7 +8,7 @@ import { useRouter } from "next/router";
 import WalletConnect from "@/components/WalletConnect";
 import { fetchMyJobs, fetchMyApplications, fetchUnreadCount } from "@/lib/api";
 import { getXLMBalance, getUSDCBalance, streamAccountTransactions } from "@/lib/stellar";
-import { formatXLM, shortenAddress, timeAgo, statusLabel, statusClass, copyToClipboard, exportJobsToCSV, exportApplicationsToCSV } from "@/utils/format";
+import { formatXLM, shortenAddress, timeAgo, statusLabel, statusClass, copyToClipboard, exportJobsToCSV, exportApplicationsToCSV, calculateJobProgress } from "@/utils/format";
 import type { Job, Application } from "@/utils/types";
 import EditProfileForm from "@/components/EditProfileForm";
 import SendPaymentForm from "@/components/SendPaymentForm";
@@ -17,11 +17,28 @@ import WithdrawToBankModal, {
   loadWithdrawHistory,
   type WithdrawHistoryEntry,
 } from "@/components/WithdrawToBankModal";
+import { useBookmarks } from "@/hooks/useBookmarks";
 import { useToast } from "@/components/Toast";
 import clsx from "clsx";
 import JobAnalytics from "@/components/JobAnalytics";
 
 const LOW_BALANCE_THRESHOLD_XLM = 5;
+
+// ── Job Alert localStorage helpers (mirrors jobs/index.tsx) ─────────────────
+const ALERT_KEY = "marketpay_job_alerts";
+
+function getAlertSubscriptions(): string[] {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(ALERT_KEY) ?? "[]"); }
+  catch { return []; }
+}
+
+function clearAlertSubscription(cat: string): void {
+  const current = getAlertSubscriptions();
+  const updated = current.filter((c) => c !== cat);
+  localStorage.setItem(ALERT_KEY, JSON.stringify(updated));
+  window.dispatchEvent(new Event("job-alerts-changed"));
+}
 
 interface DashboardProps {
   publicKey: string | null;
@@ -55,6 +72,8 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [showBuyXLM, setShowBuyXLM] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawHistoryEntry[]>([]);
+  const [savedJobs, setSavedJobs] = useState<Job[]>([]);
+  const { savedCount, getSavedJobs } = useBookmarks();
   const { info, success } = useToast();
 
   const isRepostable = (status: Job["status"]) => status === "expired" || status === "cancelled";
@@ -120,6 +139,44 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       setExtendingJob(null);
     }
   };
+
+  // Sync alert subscriptions from localStorage
+  useEffect(() => {
+    const sync = () => setAlertSubscriptions(getAlertSubscriptions());
+    sync();
+    window.addEventListener("job-alerts-changed", sync);
+    return () => window.removeEventListener("job-alerts-changed", sync);
+  }, []);
+
+  // Check for new matching jobs whenever subscriptions change
+  useEffect(() => {
+    if (alertSubscriptions.length === 0) {
+      setAlertMatches([]);
+      window.dispatchEvent(new CustomEvent("job-alert-matches", { detail: { count: 0 } }));
+      return;
+    }
+    // Fetch open jobs for each subscribed category and collect matches
+    Promise.all(
+      alertSubscriptions.map((cat) =>
+        fetchJobs({ category: cat, status: "open", limit: 5 }).then((r) => r.jobs)
+      )
+    )
+      .then((results) => {
+        const seen = new Set<string>();
+        const matches: Job[] = [];
+        for (const batch of results) {
+          for (const job of batch) {
+            if (!seen.has(job.id)) { seen.add(job.id); matches.push(job); }
+          }
+        }
+        setAlertMatches(matches);
+        setAlertMatchesDismissed(false);
+        if (matches.length > 0) {
+          window.dispatchEvent(new CustomEvent("job-alert-matches", { detail: { count: matches.length } }));
+        }
+      })
+      .catch(console.error);
+  }, [alertSubscriptions]);
 
   useEffect(() => {
     if (!publicKey) return;
@@ -328,7 +385,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
         {(["posted", "applied", "send", "transactions", "edit_profile", "templates", "price_alerts", "withdrawals"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={clsx(
-              "px-6 py-3 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap flex items-center gap-2",
+              "px-6 py-3 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap relative",
               tab === t ? "border-market-400 text-market-300" : "border-transparent text-amber-700 hover:text-amber-400"
             )}>
             {t === "posted"    ? `Jobs Posted (${myJobs.length})` :
@@ -345,6 +402,9 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
              t === "send"      ? "Send Payment" :
              t === "transactions" ? "Transactions" :
              "Edit Profile"}
+            {t === "job_alerts" && alertSubscriptions.length > 0 && (
+              <span className="absolute top-2 right-1 w-2 h-2 bg-market-400 rounded-full" />
+            )}
           </button>
         ))}
       </div>
@@ -372,16 +432,36 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
             </div>
 
             {myJobs.map((job) => (
-              <div key={job.id} className="card-hover flex items-center justify-between gap-4">
-                  <Link href={`/jobs/${job.id}`} className="flex-1 min-w-0 block">
+              <Link key={job.id} href={`/jobs/${job.id}`}>
+                <div className="card-hover flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className={statusClass(job.status)}>{statusLabel(job.status)}</span>
                       <span className="text-xs text-amber-800">{job.category}</span>
                     </div>
                     <p className="font-display font-semibold text-amber-100 truncate">{job.title}</p>
                     <p className="text-xs text-amber-800 mt-1">{job.applicantCount} applicant{job.applicantCount !== 1 ? "s" : ""} · {timeAgo(job.createdAt)}</p>
-                  </Link>
-                  <div className="text-right flex-shrink-0 space-y-2">
+                    
+                    {/* Progress Indicator */}
+                    {(() => {
+                      const progress = calculateJobProgress(job);
+                      if (!progress) return null;
+                      return (
+                        <div className="mt-3 max-w-xs">
+                          <div className="w-full bg-ink-900 rounded-full h-1.5 mb-1.5 overflow-hidden border border-market-500/10">
+                            <div 
+                              className={clsx("h-full transition-all duration-500", progress.colorClass)} 
+                              style={{ width: `${progress.percentage}%` }} 
+                            />
+                          </div>
+                          <p className="text-[10px] uppercase tracking-wider font-semibold text-amber-800">
+                            {progress.daysRemaining} days remaining
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <div className="text-right flex-shrink-0">
                     <p className="font-mono font-semibold text-market-400">{formatXLM(job.budget)}</p>
                     {isRepostable(job.status) && (
                       <button

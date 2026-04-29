@@ -1,5 +1,14 @@
 import axios from "axios";
-import type { Availability, Job, Application, UserProfile, Rating, ProfileStats, ResponseTimeStats } from "@/utils/types";
+import type {
+  Availability,
+  Job,
+  Application,
+  UserProfile,
+  Rating,
+  ProposalTemplate,
+  PriceAlertPreference,
+  SkillEndorsement,
+} from "@/utils/types";
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000",
@@ -28,12 +37,17 @@ api.interceptors.request.use((config: any) => {
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 export async function fetchAuthChallenge(publicKey: string) {
-  const { data } = await api.get<{ transaction: string }>(`/api/auth?account=${publicKey}`);
+  const { data } = await api.get<{ transaction: string }>(
+    `/api/auth?account=${publicKey}`,
+  );
   return data.transaction;
 }
 
 export async function verifyAuthChallenge(transaction: string) {
-  const { data } = await api.post<{ success: boolean; token: string }>("/api/auth", { transaction });
+  const { data } = await api.post<{ success: boolean; token: string }>(
+    "/api/auth",
+    { transaction },
+  );
   return data.token;
 }
 
@@ -66,9 +80,7 @@ export async function fetchRelatedJobs(category: string, currentJobId: string) {
     limit: 4,
   });
 
-  return jobs
-    .filter((job) => job.id !== currentJobId)
-    .slice(0, 3);
+  return jobs.filter((job) => job.id !== currentJobId).slice(0, 3);
 }
 
 export async function fetchRecentlyCompletedJobs(limit = 3): Promise<Job[]> {
@@ -85,93 +97,108 @@ export async function fetchRecentlyCompletedJobs(limit = 3): Promise<Job[]> {
  * @see backend/src/routes/jobs.js
  */
 export async function fetchJob(id: string, viewerAddress?: string) {
-  const { data } = await api.get<{ success: boolean; data: Job }>(`/api/jobs/${id}`, {
-    params: viewerAddress ? { viewerAddress } : undefined,
-  });
+  const { data } = await api.get<{ success: boolean; data: Job }>(
+    `/api/jobs/${id}`,
+    {
+      params: viewerAddress ? { viewerAddress } : undefined,
+    },
+  );
   return data.data;
 }
 
 export async function createJob(payload: {
-  title: string;
-  description: string;
-  budget: string;
-  category: string;
-  skills: string[];
-  deadline?: string;
+  title: string; description: string; budget: string;
+  currency?: "XLM" | "USDC";
+  category: string; skills: string[]; deadline?: string;
   timezone?: string;
   clientAddress: string;
   screeningQuestions?: string[];
   visibility?: "public" | "private" | "invite_only";
 }) {
-  const { data } = await api.post<{ success: boolean; data: Job }>("/api/jobs", payload);
+  const { data } = await api.post<{ success: boolean; data: Job }>(
+    "/api/jobs",
+    payload,
+  );
   return data.data;
 }
 
 export async function fetchMyJobs(publicKey: string) {
-  const { data } = await api.get<{ success: boolean; data: Job[] }>(`/api/jobs/client/${publicKey}`);
+  const { data } = await api.get<{ success: boolean; data: Job[] }>(
+    `/api/jobs/client/${publicKey}`,
+  );
   return data.data;
 }
 
 /**
-   * Evaluates application quality using AI (Claude API).
-   * 
-   * @param jobId Job identifier.
-   * @returns Array of scores and reasonings for all applications.
-   */
-  export async function scoreProposals(jobId: string) {
-    const { data } = await api.post<{ success: boolean; data: { id: string; score: number; reasoning: string }[] }>(
-      `/api/jobs/${jobId}/score-proposals`
-    );
-    return data.data;
-  }
+ * Evaluates application quality using AI (Claude API).
+ *
+ * @param jobId Job identifier.
+ * @returns Array of scores and reasonings for all applications.
+ */
+export async function scoreProposals(jobId: string) {
+  const { data } = await api.post<{
+    success: boolean;
+    data: { id: string; score: number; reasoning: string }[];
+  }>(`/api/jobs/${jobId}/score-proposals`);
+  return data.data;
+}
 
-  /**
-   * Get analytics for a job (applications per day, avg bid, skill distribution, time to hire).
-   *
-   * @param jobId Job identifier.
-   * @returns Analytics data for the job.
-   */
-  export async function fetchJobAnalytics(jobId: string) {
-    const { data } = await api.get<{ success: boolean; data: JobAnalytics }>(`/api/jobs/${jobId}/analytics`);
-    return data.data;
-  }
+/**
+ * Get analytics for a job (applications per day, avg bid, skill distribution, time to hire).
+ *
+ * @param jobId Job identifier.
+ * @returns Analytics data for the job.
+ */
+export async function fetchJobAnalytics(jobId: string) {
+  const { data } = await api.get<{ success: boolean; data: JobAnalytics }>(
+    `/api/jobs/${jobId}/analytics`,
+  );
+  return data.data;
+}
 
-  /**
-   * Extend a job's expiry by 30 days.
-   *
-   * @param jobId Job identifier.
-   * @returns Updated job record.
-   */
-  export async function extendJobExpiry(jobId: string) {
-    const { data } = await api.patch<{ success: boolean; data: Job }>(`/api/jobs/${jobId}/extend`);
-    return data.data;
-  }
+/**
+ * Extend a job's expiry by 30 days.
+ *
+ * @param jobId Job identifier.
+ * @returns Updated job record.
+ */
+export async function extendJobExpiry(jobId: string) {
+  const { data } = await api.patch<{ success: boolean; data: Job }>(
+    `/api/jobs/${jobId}/extend`,
+  );
+  return data.data;
+}
 
-  /**
-   * Get jobs expiring within 3 days.
-   *
-   * @returns Array of expiring jobs.
-   */
-  export async function fetchExpiringJobs() {
-    const { data } = await api.get<{ success: boolean; data: Job[] }>("/api/jobs/expiring");
-    return data.data;
-  }
+/**
+ * Get jobs expiring within 3 days.
+ *
+ * @returns Array of expiring jobs.
+ */
+export async function fetchExpiringJobs() {
+  const { data } = await api.get<{ success: boolean; data: Job[] }>(
+    "/api/jobs/expiring",
+  );
+  return data.data;
+}
 
-  /**
-   * Manually trigger expiry check for old jobs.
-   *
-   * @returns Count of expired jobs.
-   */
-  export async function expireOldJobs() {
-    const { data } = await api.post<{ success: boolean; data: { expiredCount: number } }>("/api/jobs/expire-old");
-    return data.data.expiredCount;
-  }
+/**
+ * Manually trigger expiry check for old jobs.
+ *
+ * @returns Count of expired jobs.
+ */
+export async function expireOldJobs() {
+  const { data } = await api.post<{
+    success: boolean;
+    data: { expiredCount: number };
+  }>("/api/jobs/expire-old");
+  return data.data.expiredCount;
+}
 
 // ─── Applications ─────────────────────────────────────────────────────────────
 
 export async function fetchApplications(jobId: string) {
   const { data } = await api.get<{ success: boolean; data: Application[] }>(
-    `/api/applications/job/${jobId}`
+    `/api/applications/job/${jobId}`,
   );
   return data.data;
 }
@@ -183,15 +210,19 @@ export async function submitApplication(payload: {
   bidAmount: string;
   currency: string;
   screeningAnswers?: Record<string, string>;
+  referredBy?: string;
 }) {
   const { data } = await api.post<{ success: boolean; data: Application }>(
     "/api/applications",
-    payload
+    payload,
   );
   return data.data;
 }
 
-export async function acceptApplication(applicationId: string, clientAddress: string) {
+export async function acceptApplication(
+  applicationId: string,
+  clientAddress: string,
+) {
   const { data } = await api.post(`/api/applications/${applicationId}/accept`, {
     clientAddress,
   });
@@ -200,7 +231,7 @@ export async function acceptApplication(applicationId: string, clientAddress: st
 
 export async function fetchMyApplications(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: Application[] }>(
-    `/api/applications/freelancer/${publicKey}`
+    `/api/applications/freelancer/${publicKey}`,
   );
   return data.data;
 }
@@ -209,15 +240,17 @@ export async function fetchMyApplications(publicKey: string) {
 
 export async function fetchProfile(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: UserProfile }>(
-    `/api/profiles/${publicKey}`
+    `/api/profiles/${publicKey}`,
   );
   return data.data;
 }
 
-export async function fetchPublicProfile(publicKey: string): Promise<UserProfile | null> {
+export async function fetchPublicProfile(
+  publicKey: string,
+): Promise<UserProfile | null> {
   try {
     const { data } = await api.get<{ success: boolean; data: UserProfile }>(
-      `/api/profiles/${encodeURIComponent(publicKey)}`
+      `/api/profiles/${encodeURIComponent(publicKey)}`,
     );
     return data.data;
   } catch (e) {
@@ -226,25 +259,30 @@ export async function fetchPublicProfile(publicKey: string): Promise<UserProfile
   }
 }
 
-export async function upsertProfile(payload: Partial<UserProfile> & { publicKey: string }) {
+export async function upsertProfile(
+  payload: Partial<UserProfile> & { publicKey: string },
+) {
   const { data } = await api.post<{ success: boolean; data: UserProfile }>(
     "/api/profiles",
-    payload
+    payload,
   );
   return data.data;
 }
 
-export async function updateProfileAvailability(publicKey: string, payload: Availability) {
+export async function updateProfileAvailability(
+  publicKey: string,
+  payload: Availability,
+) {
   const { data } = await api.post<{ success: boolean; data: UserProfile }>(
     `/api/profiles/${encodeURIComponent(publicKey)}/availability`,
-    payload
+    payload,
   );
   return data.data;
 }
 
 /**
  * Verifies a user's identity via a DID provider and stores the resulting credential hash.
- * 
+ *
  * @param publicKey User Stellar public key.
  * @param didHash The credential hash/DID URI returned by the provider.
  * @returns The updated profile.
@@ -252,44 +290,23 @@ export async function updateProfileAvailability(publicKey: string, payload: Avai
 export async function verifyIdentity(publicKey: string, didHash: string) {
   const { data } = await api.post<{ success: boolean; data: UserProfile }>(
     `/api/profiles/${encodeURIComponent(publicKey)}/verify`,
-    { didHash }
-  );
-  return data.data;
-}
-
-/**
- * Fetches application statistics for a freelancer profile.
- *
- * @param publicKey Freelancer Stellar public key.
- * @returns Statistics including total applications, accepted count, and success rate.
- */
-export async function fetchProfileStats(publicKey: string) {
-  const { data } = await api.get<{ success: boolean; data: ProfileStats }>(
-    `/api/profiles/${encodeURIComponent(publicKey)}/stats`
-  );
-  return data.data;
-}
-
-/**
- * Fetches the average response time (acceptance to completion) for a freelancer.
- *
- * @param publicKey Freelancer Stellar public key.
- * @returns Average response time in days.
- */
-export async function fetchResponseTime(publicKey: string) {
-  const { data } = await api.get<{ success: boolean; data: ResponseTimeStats }>(
-    `/api/profiles/${encodeURIComponent(publicKey)}/response-time`
+    { didHash },
   );
   return data.data;
 }
 
 // ─── Escrow ───────────────────────────────────────────────────────────────────
 
+export async function fetchEscrow(jobId: string) {
+  const { data } = await api.get<{ success: boolean; data: any }>(`/api/escrow/${jobId}`);
+  return data.data;
+}
+
 export async function releaseEscrow(
   jobId: string,
   clientAddress: string,
   contractTxHash?: string,
-  releaseCurrency?: "XLM" | "USDC"
+  releaseCurrency?: "XLM" | "USDC",
 ) {
   const { data } = await api.post(`/api/escrow/${jobId}/release`, {
     clientAddress,
@@ -299,25 +316,46 @@ export async function releaseEscrow(
   return data.data;
 }
 
-export async function inviteFreelancer(jobId: string, freelancerAddress: string) {
-  const { data } = await api.post<{ success: boolean; data: any }>(`/api/jobs/${jobId}/invite`, {
-    freelancerAddress,
-  });
+export async function inviteFreelancer(
+  jobId: string,
+  freelancerAddress: string,
+) {
+  const { data } = await api.post<{ success: boolean; data: any }>(
+    `/api/jobs/${jobId}/invite`,
+    {
+      freelancerAddress,
+    },
+  );
   return data.data;
 }
 
 export async function fetchProposalTemplates() {
-  const { data } = await api.get<{ success: boolean; data: ProposalTemplate[] }>("/api/proposal-templates");
+  const { data } = await api.get<{
+    success: boolean;
+    data: ProposalTemplate[];
+  }>("/api/proposal-templates");
   return data.data;
 }
 
-export async function createProposalTemplate(payload: { name: string; content: string }) {
-  const { data } = await api.post<{ success: boolean; data: ProposalTemplate }>("/api/proposal-templates", payload);
+export async function createProposalTemplate(payload: {
+  name: string;
+  content: string;
+}) {
+  const { data } = await api.post<{ success: boolean; data: ProposalTemplate }>(
+    "/api/proposal-templates",
+    payload,
+  );
   return data.data;
 }
 
-export async function updateProposalTemplate(id: string, payload: { name?: string; content?: string }) {
-  const { data } = await api.patch<{ success: boolean; data: ProposalTemplate }>(`/api/proposal-templates/${id}`, payload);
+export async function updateProposalTemplate(
+  id: string,
+  payload: { name?: string; content?: string },
+) {
+  const { data } = await api.patch<{
+    success: boolean;
+    data: ProposalTemplate;
+  }>(`/api/proposal-templates/${id}`, payload);
   return data.data;
 }
 
@@ -326,22 +364,26 @@ export async function deleteProposalTemplate(id: string) {
 }
 
 export async function fetchPriceAlertPreference(publicKey: string) {
-  const { data } = await api.get<{ success: boolean; data: PriceAlertPreference | null }>(
-    `/api/profiles/${encodeURIComponent(publicKey)}/price-alerts`
-  );
+  const { data } = await api.get<{
+    success: boolean;
+    data: PriceAlertPreference | null;
+  }>(`/api/profiles/${encodeURIComponent(publicKey)}/price-alerts`);
   return data.data;
 }
 
-export async function upsertPriceAlertPreference(publicKey: string, payload: {
-  minXlmPriceUsd?: number | null;
-  maxXlmPriceUsd?: number | null;
-  emailNotificationsEnabled?: boolean;
-  email?: string;
-}) {
-  const { data } = await api.post<{ success: boolean; data: PriceAlertPreference }>(
-    `/api/profiles/${encodeURIComponent(publicKey)}/price-alerts`,
-    payload
-  );
+export async function upsertPriceAlertPreference(
+  publicKey: string,
+  payload: {
+    minXlmPriceUsd?: number | null;
+    maxXlmPriceUsd?: number | null;
+    emailNotificationsEnabled?: boolean;
+    email?: string;
+  },
+) {
+  const { data } = await api.post<{
+    success: boolean;
+    data: PriceAlertPreference;
+  }>(`/api/profiles/${encodeURIComponent(publicKey)}/price-alerts`, payload);
   return data.data;
 }
 
@@ -352,16 +394,42 @@ export async function upsertPriceAlertPreference(publicKey: string, payload: {
  * @param escrowContractId Soroban transaction hash returned after create_escrow().
  * @returns The updated job record.
  */
-export async function updateJobEscrowId(jobId: string, escrowContractId: string) {
+export async function updateJobEscrowId(
+  jobId: string,
+  escrowContractId: string,
+) {
   const { data } = await api.patch<{ success: boolean; data: Job }>(
     `/api/jobs/${jobId}/escrow`,
-    { escrowContractId }
+    { escrowContractId },
   );
   return data.data;
 }
 
 export async function deleteJob(jobId: string) {
   await api.delete(`/api/jobs/${jobId}`);
+}
+
+/**
+ * Raises a dispute for an in-progress job.
+ *
+ * @param jobId Job identifier.
+ * @param payload Dispute details (reason and description).
+ * @returns The updated job record.
+ */
+export async function raiseDispute(jobId: string, payload: { reason: string; description: string }) {
+  const { data } = await api.post<{ success: boolean; data: Job }>(`/api/jobs/${jobId}/dispute`, payload);
+  return data.data;
+}
+
+/**
+ * Resolves a dispute for a job (Admin only).
+ *
+ * @param jobId Job identifier.
+ * @returns The updated job record.
+ */
+export async function resolveDispute(jobId: string) {
+  const { data } = await api.post<{ success: boolean; data: Job }>(`/api/jobs/${jobId}/resolve`);
+  return data.data;
 }
 
 // ─── Ratings ──────────────────────────────────────────────────────────────────
@@ -372,38 +440,56 @@ export async function submitRating(payload: {
   stars: number;
   review?: string;
 }) {
-  const { data } = await api.post<{ success: boolean; data: Rating }>("/api/ratings", payload);
+  const { data } = await api.post<{ success: boolean; data: Rating }>(
+    "/api/ratings",
+    payload,
+  );
   return data.data;
 }
 
 export async function fetchRatings(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: Rating[] }>(
-    `/api/ratings/${publicKey}`
+    `/api/ratings/${publicKey}`,
   );
   return data.data;
 }
 
 // ─── Job Suggestions (Autocomplete) ─────────────────────────────────────
 
-export async function fetchJobSuggestions(query: string): Promise<{ type: 'title' | 'skill' | 'category'; value: string }[]> {
-  const { data } = await api.get<{ success: boolean; data: { type: string; value: string }[] }>("/api/jobs/suggestions", { params: { q: query } });
-  return data.data.map((item) => ({ type: item.type as 'title' | 'skill' | 'category', value: item.value }));
+export async function fetchJobSuggestions(
+  query: string,
+): Promise<{ type: "title" | "skill" | "category"; value: string }[]> {
+  const { data } = await api.get<{
+    success: boolean;
+    data: { type: string; value: string }[];
+  }>("/api/jobs/suggestions", { params: { q: query } });
+  return data.data.map((item) => ({
+    type: item.type as "title" | "skill" | "category",
+    value: item.value,
+  }));
 }
 
 // ─── Job Drafts (Issue #219) ────────────────────────────────────────────
 
 export async function saveDraft(draftData: any) {
-  const { data } = await api.post<{ success: boolean; data: any }>("/api/jobs/drafts", draftData);
+  const { data } = await api.post<{ success: boolean; data: any }>(
+    "/api/jobs/drafts",
+    draftData,
+  );
   return data.data;
 }
 
 export async function fetchDrafts() {
-  const { data } = await api.get<{ success: boolean; data: any[] }>("/api/jobs/drafts");
+  const { data } = await api.get<{ success: boolean; data: any[] }>(
+    "/api/jobs/drafts",
+  );
   return data.data;
 }
 
 export async function fetchDraft(draftId: string) {
-  const { data } = await api.get<{ success: boolean; data: any }>(`/api/jobs/drafts/${draftId}`);
+  const { data } = await api.get<{ success: boolean; data: any }>(
+    `/api/jobs/drafts/${draftId}`,
+  );
   return data.data;
 }
 
@@ -414,7 +500,42 @@ export async function deleteDraft(draftId: string) {
 // ─── Job Recommendations (Issue #221) ───────────────────────────────────
 
 export async function fetchRecommendedJobs(limit = 10) {
-  const { data } = await api.get<{ success: boolean; data: Job[] }>("/api/jobs/recommended", { params: { limit } });
+  const { data } = await api.get<{ success: boolean; data: Job[] }>(
+    "/api/jobs/recommended",
+    { params: { limit } },
+  );
+  return data.data;
+}
+
+// ─── Skill Endorsements ───────────────────────────────────────────────────────
+
+/**
+ * Endorse a specific skill on a freelancer's profile.
+ *
+ * @param recipientAddress Profile owner's Stellar public key.
+ * @param skill The skill name to endorse.
+ */
+export async function endorseSkill(recipientAddress: string, skill: string) {
+  const { data } = await api.post<{ success: boolean }>(
+    `/api/profiles/${encodeURIComponent(recipientAddress)}/skill-endorsements`,
+    { skill },
+  );
+  return data;
+}
+
+/**
+ * Fetch skill endorsements for a freelancer.
+ *
+ * @param publicKey Profile owner's Stellar public key.
+ * @returns Array of endorsements grouped by skill.
+ */
+export async function fetchSkillEndorsements(
+  publicKey: string,
+): Promise<SkillEndorsement[]> {
+  const { data } = await api.get<{
+    success: boolean;
+    data: SkillEndorsement[];
+  }>(`/api/profiles/${encodeURIComponent(publicKey)}/skill-endorsements`);
   return data.data;
 }
 
@@ -603,49 +724,3 @@ export async function getTurretsConfig() {
 
   return data.data;
 }
-
-// ─── Messages ──────────────────────────────────────────────────────────────────
-
-/**
- * Fetches all messages for a specific job.
- * Automatically marks messages as read for the current user.
- *
- * @param jobId Job identifier.
- * @returns Messages sorted chronologically (oldest first).
- * @throws {import("axios").AxiosError} If unauthorized, job not found, or request fails.
- * @see backend/src/routes/messageRoutes.js
- */
-export async function fetchMessages(jobId: string): Promise<Message[]> {
-  const { data } = await api.get<{ success: boolean; data: Message[] }>(`/api/messages/job/${jobId}`);
-  return data.data;
-}
-
-/**
- * Sends a message in a job thread.
- *
- * Request payload shape:
- * - `content` (string): message text (1-2000 characters).
- *
- * @param jobId Job identifier.
- * @param content Message content.
- * @returns The created message object.
- * @throws {import("axios").AxiosError} If unauthorized, validation fails, or request fails.
- * @see backend/src/routes/messageRoutes.js
- */
-export async function sendMessage(jobId: string, content: string): Promise<Message> {
-  const { data } = await api.post<{ success: boolean; data: Message }>(`/api/messages/job/${jobId}`, { content });
-  return data.data;
-}
-
-/**
- * Fetches the total unread message count for the authenticated user.
- *
- * @returns Number of unread messages.
- * @throws {import("axios").AxiosError} If not authenticated or request fails.
- * @see backend/src/routes/messageRoutes.js
- */
-export async function fetchUnreadCount(): Promise<number> {
-  const { data } = await api.get<{ success: boolean; data: { unreadCount: number } }>("/api/messages/unread-count");
-  return data.data.unreadCount;
-}
-

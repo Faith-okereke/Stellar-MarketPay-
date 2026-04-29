@@ -205,8 +205,7 @@ function rowToProfile(row) {
     completedJobs: row.completed_jobs,
     totalEarnedXLM: row.total_earned_xlm,
     rating: row.rating !== null ? parseFloat(row.rating) : null,
-    didHash: row.did_hash,
-    isKycVerified: row.is_kyc_verified,
+    blockedAddresses: Array.isArray(row.blocked_addresses) ? row.blocked_addresses : [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -253,6 +252,7 @@ async function getProfile(publicKey) {
   const profile = rowToProfile(rows[0]);
   profile.rating = rows[0].avg_rating !== null ? parseFloat(rows[0].avg_rating) : null;
   profile.ratingCount = rows[0].rating_count;
+  profile.tier = calculateFreelancerTier(profile.completedJobs, profile.rating);
 
   // Calculate reputation score (simple formula: higher weight on ratings, lower on time)
   // Max score 100.
@@ -268,6 +268,12 @@ async function getProfile(publicKey) {
   const releaseHours = parseFloat(rows[0].avg_release_hours || 0);
   if (releaseHours > 0 && releaseHours < 48) repScore += 10;
   else if (releaseHours > 0 && releaseHours < 168) repScore += 5;
+
+  // Bonus for referral activity (1 point per 2 referrals, max 10)
+  repScore += Math.min(Math.floor((profile.referralCount || 0) / 2), 10);
+
+  // Direct reputation points from referrals/completions
+  repScore += (profile.reputationPoints || 0);
 
   profile.reputationScore = Math.min(repScore, 100);
   profile.reputationMetrics = {
@@ -382,59 +388,136 @@ async function updateAvailability(publicKey, availability) {
   return rowToProfile(rows[0]);
 }
 
-async function getProfileStats(publicKey) {
-  validatePublicKey(publicKey);
+async function isBlocked(clientPublicKey, freelancerAddress) {
+  validatePublicKey(clientPublicKey);
+  validatePublicKey(freelancerAddress);
 
   const { rows } = await pool.query(
-    `SELECT 
-       COUNT(*)::int AS total_applications,
-       COUNT(CASE WHEN status = 'accepted' THEN 1 END)::int AS accepted_applications
-     FROM applications
-     WHERE freelancer_address = $1`,
-    [publicKey]
+    `SELECT 1 FROM profiles WHERE public_key = $1 AND $2 = ANY(blocked_addresses)`,
+    [clientPublicKey, freelancerAddress]
   );
-
-  const stats = rows[0];
-  const total = stats.total_applications || 0;
-  const accepted = stats.accepted_applications || 0;
-  const successRate = total > 0 ? Math.round((accepted / total) * 100) : 0;
-
-  return {
-    totalApplications: total,
-    acceptedApplications: accepted,
-    successRate
-  };
+  return rows.length > 0;
 }
 
-async function getResponseTime(publicKey) {
+async function blockFreelancer(clientPublicKey, freelancerAddress) {
+  validatePublicKey(clientPublicKey);
+  validatePublicKey(freelancerAddress);
+
+  if (clientPublicKey === freelancerAddress) {
+    const e = new Error("You cannot block yourself");
+    e.status = 400;
+    throw e;
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE profiles
+     SET blocked_addresses = array_append(blocked_addresses, $2),
+         updated_at = NOW()
+     WHERE public_key = $1
+       AND NOT ($2 = ANY(blocked_addresses))
+     RETURNING *`,
+    [clientPublicKey, freelancerAddress]
+  );
+
+  if (!rows.length) {
+    // Already blocked or profile not found; check which
+    const profile = await getProfile(clientPublicKey);
+    if (profile.blockedAddresses.includes(freelancerAddress)) {
+      const e = new Error("Freelancer is already blocked");
+      e.status = 409;
+      throw e;
+    }
+  }
+
+  return rowToProfile(rows[0]);
+}
+
+async function unblockFreelancer(clientPublicKey, freelancerAddress) {
+  validatePublicKey(clientPublicKey);
+  validatePublicKey(freelancerAddress);
+
+  const { rows } = await pool.query(
+    `UPDATE profiles
+     SET blocked_addresses = array_remove(blocked_addresses, $2),
+         updated_at = NOW()
+     WHERE public_key = $1
+     RETURNING *`,
+    [clientPublicKey, freelancerAddress]
+  );
+
+  if (!rows.length) {
+    const e = new Error("Profile not found");
+    e.status = 404;
+    throw e;
+  }
+
+  return rowToProfile(rows[0]);
+}
+
+/**
+ * Fetch skill endorsements for a user, grouped by skill with counts and endorsers.
+ *
+ * @param {string} publicKey  Recipient Stellar G-address.
+ * @returns {Promise<{ skill: string; count: number; endorsers: string[] }[]>}
+ */
+async function getSkillEndorsements(publicKey) {
   validatePublicKey(publicKey);
 
   const { rows } = await pool.query(
-    `SELECT 
-       AVG(EXTRACT(EPOCH FROM (e.released_at - a.accepted_at)) / 86400)::numeric AS avg_days
-     FROM applications a
-     JOIN escrows e ON a.job_id = e.job_id
-     WHERE a.freelancer_address = $1 
-       AND a.status = 'accepted' 
-       AND a.accepted_at IS NOT NULL 
-       AND e.status = 'released' 
-       AND e.released_at IS NOT NULL`,
+    `SELECT
+       skill,
+       COUNT(*)::int AS count,
+       array_agg(endorser_address ORDER BY created_at DESC) AS endorsers
+     FROM skill_endorsements
+     WHERE recipient_address = $1
+     GROUP BY skill
+     ORDER BY count DESC, skill ASC`,
     [publicKey]
   );
 
-  const avgDays = rows[0].avg_days ? parseFloat(rows[0].avg_days) : null;
+  return rows;
+}
 
-  return {
-    averageDays: avgDays !== null ? parseFloat(avgDays.toFixed(1)) : null
-  };
+/**
+ * Create a skill endorsement.
+ *
+ * @param {Object} params
+ * @param {string} params.skill            Skill name.
+ * @param {string} params.endorserAddress  Endorser Stellar G-address.
+ * @param {string} params.recipientAddress Recipient Stellar G-address.
+ * @returns {Promise<void>}
+ * @throws {Error} 400 — invalid public key, self-endorsement, or missing skill.
+ */
+async function endorseSkill({ skill, endorserAddress, recipientAddress }) {
+  validatePublicKey(endorserAddress);
+  validatePublicKey(recipientAddress);
+
+  if (!skill || typeof skill !== "string" || !skill.trim()) {
+    throw createValidationError("skill is required");
+  }
+
+  if (endorserAddress === recipientAddress) {
+    const e = new Error("Cannot endorse your own skill");
+    e.status = 400;
+    throw e;
+  }
+
+  await pool.query(
+    `INSERT INTO skill_endorsements (skill, endorser_address, recipient_address)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (skill, endorser_address, recipient_address) DO NOTHING`,
+    [skill.trim(), endorserAddress, recipientAddress]
+  );
 }
 
 module.exports = {
   getProfile,
   upsertProfile,
   updateAvailability,
-  getProfileStats,
-  getResponseTime,
+  verifyIdentity,
+  getSkillEndorsements,
+  endorseSkill,
+  calculateFreelancerTier,
   VALID_PORTFOLIO_TYPES,
   VALID_AVAILABILITY_STATUSES,
   MAX_PORTFOLIO_ITEMS,
