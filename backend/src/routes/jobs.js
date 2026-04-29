@@ -9,6 +9,10 @@ const router = express.Router();
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { verifyJWT } = require("../middleware/auth");
 
+// Rate limiters for different job operations
+const generalJobRateLimiter = createRateLimiter(100, 1); // 100 requests per minute
+const jobCreationRateLimiter = createRateLimiter(10, 1); // 10 job creations per minute
+
 const jobService = require("../services/jobService");
 const { createJob, getJob, listJobs, listJobsByClient, updateJobEscrowId, deleteJob, boostJob, incrementShareCount } = jobService.default || jobService;
 const { inviteFreelancerToJob } = require("../services/jobInvitationService");
@@ -16,7 +20,7 @@ const { logContractInteraction } = require("../services/contractAuditService");
 const jobDraftService = require("../services/jobDraftService");
 const recommendationService = require("../services/recommendationService");
 
-const jobReports = new Map();
+// Feed Helpers
 
 // Rate limiters
 const generalJobRateLimiter = createRateLimiter(100, 1); // 100 requests per minute
@@ -55,6 +59,73 @@ function isValidReportCategory(category) {
   return ["fraud", "suspicious", "spam", "inappropriate", "other"].includes(category);
 }
 
+/**
+ * @swagger
+ * /api/jobs:
+ *   get:
+ *     summary: List jobs
+ *     description: Returns a paginated list of jobs with optional filtering
+ *     tags: [Jobs]
+ *     parameters:
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by job category
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [open, in_progress, completed, cancelled]
+ *         description: Filter by job status
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 20
+ *         description: Maximum number of jobs to return
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search term for job titles and descriptions
+ *       - in: query
+ *         name: cursor
+ *         schema:
+ *           type: string
+ *         description: Pagination cursor for next page
+ *       - in: query
+ *         name: timezone
+ *         schema:
+ *           type: string
+ *         description: Timezone for date formatting
+ *       - in: query
+ *         name: viewerAddress
+ *         schema:
+ *           type: string
+ *         description: Viewer's Stellar address for permission checks
+ *     responses:
+ *       200:
+ *         description: Jobs retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Job'
+ *                 nextCursor:
+ *                   type: string
+ *                   nullable: true
+ *                   description: Cursor for next page
+ */
 // GET /api/jobs — list jobs
 router.get("/", generalJobRateLimiter, async (req, res, next) => {
   try {
@@ -71,26 +142,95 @@ router.get("/client/:publicKey", generalJobRateLimiter, async (req, res, next) =
   catch (e) { next(e); }
 });
 
-// GET /api/jobs/:id — get single job
-router.get("/:id", generalJobRateLimiter, async (req, res, next) => {
+// GET /api/jobs/recommended/:publicKey — top 5 skill-matched open jobs for a freelancer
+router.get("/recommended/:publicKey", generalJobRateLimiter, async (req, res, next) => {
   try {
-    const job = await getJob(req.params.id);
-    const viewerAddress = req.query.viewerAddress;
-    const canView =
-      job.visibility === "public" ||
-      (typeof viewerAddress === "string" &&
-        (viewerAddress === job.clientAddress || viewerAddress === job.freelancerAddress));
+    const jobs = await getRecommendedJobs(req.params.publicKey);
+    res.json({ success: true, data: jobs });
+  } catch (e) { next(e); }
+});
 
-    if (job.visibility === "private" && !canView) {
-      return res.status(403).json({ success: false, error: "Job is private" });
-    }
-    res.json({ success: true, data: job });
-  }
+// GET /api/jobs/:id — get single job
+router.get("/:id", generalJobRateLimiter , async (req, res, next) => {
+  try { res.json({ success: true, data: await getJob(req.params.id) }); }
   catch (e) { next(e); }
 });
 
+/**
+ * @swagger
+ * /api/jobs:
+ *   post:
+ *     summary: Create a new job
+ *     description: Creates a new job posting in the marketplace
+ *     tags: [Jobs]
+ *     security:
+ *       - bearerAuth: []
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - description
+ *               - budget
+ *               - clientId
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Job title
+ *               description:
+ *                 type: string
+ *                 description: Detailed job description
+ *               budget:
+ *                 type: number
+ *                 description: Job budget in XLM
+ *               clientId:
+ *                 type: string
+ *                 description: Client's Stellar address
+ *               category:
+ *                 type: string
+ *                 description: Job category
+ *               skills:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Required skills
+ *               visibility:
+ *                 type: string
+ *                 enum: [public, private]
+ *                 default: public
+ *                 description: Job visibility
+ *     responses:
+ *       201:
+ *         description: Job created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Job'
+ *       400:
+ *         description: Bad request - invalid input data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized - authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 // POST /api/jobs — create a new job
-router.post("/", jobCreationRateLimiter, async (req, res, next) => {
+router.post("/", jobCreationRateLimiter , async (req, res, next) => {
   try {
     const job = await createJob(req.body);
     res.status(201).json({ success: true, data: job });
@@ -180,8 +320,19 @@ router.patch("/:id/extend", verifyJWT, generalJobRateLimiter, async (req, res, n
   } catch (e) { next(e); }
 });
 
-// GET /api/jobs/expiring — get jobs expiring within 3 days (for warnings)
-router.get("/expiring", verifyJWT, generalJobRateLimiter, async (req, res, next) => {
+// POST /api/jobs/:id/referral — track a referral click
+router.post("/:id/referral", generalJobRateLimiter, async (req, res, next) => {
+  try {
+    const { referrer } = req.body;
+    if (!referrer) return res.status(400).json({ success: false, error: "Referrer address is required" });
+    const ip = req.ip;
+    await trackReferral(req.params.id, referrer, ip);
+    res.json({ success: true });
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/jobs/:id — roll back an orphaned job (escrow failed after creation)
+router.delete("/:id", verifyJWT, generalJobRateLimiter, async (req, res, next) => {
   try {
     const { getExpiringJobs } = require("../services/jobService");
     const jobs = await getExpiringJobs(3);
@@ -248,6 +399,36 @@ router.get("/suggestions", generalJobRateLimiter, async (req, res, next) => {
 
     const suggestions = [...titleSuggestions, ...skillSuggestions, ...categorySuggestions];
     res.json({ success: true, data: suggestions });
+  } catch (e) { next(e); }
+});
+
+// POST /api/jobs/:id/dispute — raise a dispute for an in-progress job
+router.post("/:id/dispute", verifyJWT, generalJobRateLimiter, async (req, res, next) => {
+  try {
+    const { reason, description } = req.body;
+    if (!reason || !description) {
+      return res.status(400).json({ success: false, error: "Reason and description are required" });
+    }
+    const job = await raiseDispute(req.params.id, { 
+      reason, 
+      description, 
+      raisedBy: req.user.publicKey 
+    });
+    res.json({ success: true, data: job });
+  } catch (e) { next(e); }
+});
+
+// POST /api/jobs/:id/resolve — resolve a dispute (Admin only)
+router.post("/:id/resolve", verifyJWT, generalJobRateLimiter, async (req, res, next) => {
+  try {
+    // Basic admin check - in a real app this would be more robust
+    const adminKey = process.env.ADMIN_PUBLIC_KEY;
+    if (adminKey && req.user.publicKey !== adminKey) {
+      return res.status(403).json({ success: false, error: "Only admins can resolve disputes" });
+    }
+    
+    const job = await resolveDispute(req.params.id);
+    res.json({ success: true, data: job });
   } catch (e) { next(e); }
 });
 

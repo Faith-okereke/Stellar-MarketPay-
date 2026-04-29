@@ -16,7 +16,7 @@ const { WebSocketServer } = require("ws");
 const nodemailer = require("nodemailer");
 const { sanitizeMiddleware } = require("./middleware/sanitize");
 
-const jobRoutes = require("./routes/jobs");
+const jobRoutes       = require("./routes/jobs");
 const applicationRoutes = require("./routes/applications");
 const profileRoutes     = require("./routes/profiles");
 const escrowRoutes      = require("./routes/escrow");
@@ -162,6 +162,12 @@ app.use(morgan("dev"));
 app.use(express.json({ limit: "20kb" }));
 app.use(sanitizeMiddleware({ strict: false }));
 
+// Swagger UI
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Stellar MarketPay API Documentation'
+}));
+
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",").map(o => o.trim());
 app.use(cors({
   origin: (origin, cb) => (!origin || allowedOrigins.includes(origin)) ? cb(null, true) : cb(new Error("CORS blocked")),
@@ -181,22 +187,8 @@ app.use("/api/profiles",      profileRoutes);
 app.use("/api/escrow",        escrowRoutes);
 app.use("/api/ratings",       ratingRoutes);
 app.use("/api/progress",      progressRoutes);
-app.use("/api/events",        eventRoutes);
-app.use("/api/stats",         statsRoutes);
-app.use("/api/contributors",  contributorRoutes);
-app.use("/api/verification",  verificationRoutes);
-app.use("/api/nft",           nftRoutes);
-app.use("/api/ai-scorer",     aiScorerRoutes);
-app.use("/api/faucet",        faucetRoutes);
-app.use("/api/tokens",        tokenRoutes);
-app.use("/api/turrets",       turretsRoutes);
-
-app.get("/api/indexer/health", (req, res) => {
-  res.json({
-    status: "ok",
-    indexer: indexerService.getHealth(),
-  });
-});
+app.use("/api/assessments",   assessmentRoutes);
+app.use("/api/admin",         adminRoutes);
 
 app.use((err, req, res, next) => {
   console.error("[Error]", err.message);
