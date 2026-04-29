@@ -203,3 +203,51 @@ CREATE TABLE IF NOT EXISTS referrals (
 
 CREATE INDEX IF NOT EXISTS referrals_referrer_address_idx ON referrals(referrer_address);
 CREATE INDEX IF NOT EXISTS referrals_job_id_idx          ON referrals(job_id);
+
+-- ─────────────────────────────────────────
+-- scope_sessions (real-time collaborative editor — Issue #227)
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS scope_sessions (
+  session_id        TEXT PRIMARY KEY,
+  content           TEXT          NOT NULL DEFAULT '',
+  cursors           JSONB         NOT NULL DEFAULT '{}'::jsonb,
+  finalized         BOOLEAN       NOT NULL DEFAULT false,
+  finalized_payload JSONB,
+  expires_at        TIMESTAMPTZ   NOT NULL,
+  created_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS scope_sessions_expires_at_idx ON scope_sessions(expires_at);
+
+-- ─────────────────────────────────────────
+-- webauthn_credentials (passkey auth — Issue #218)
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  id               UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
+  public_key       TEXT  NOT NULL REFERENCES profiles(public_key) ON DELETE CASCADE,
+  credential_id    TEXT  NOT NULL UNIQUE,
+  credential_name  TEXT  NOT NULL DEFAULT 'Passkey',
+  public_key_cose  TEXT  NOT NULL,
+  counter          BIGINT NOT NULL DEFAULT 0,
+  transports       TEXT[] NOT NULL DEFAULT '{}',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS webauthn_credentials_public_key_idx ON webauthn_credentials(public_key);
+
+-- ─────────────────────────────────────────
+-- dispute_evidence (IPFS evidence upload — Issue #223)
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS dispute_evidence (
+  id               UUID  PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id           UUID  NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  uploader_address TEXT  NOT NULL REFERENCES profiles(public_key),
+  file_name        TEXT  NOT NULL,
+  file_size        INTEGER NOT NULL,
+  mime_type        TEXT  NOT NULL,
+  ipfs_cid         TEXT  NOT NULL,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS dispute_evidence_job_id_idx ON dispute_evidence(job_id);

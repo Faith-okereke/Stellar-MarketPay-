@@ -606,3 +606,110 @@ export async function fetchUnreadCount(): Promise<number> {
   return data.data.unreadCount;
 }
 
+// ─── Earnings (Issue #181) ────────────────────────────────────────────────────
+
+export interface EarningPayment {
+  id: string;
+  jobId: string;
+  jobTitle: string;
+  amountXlm: string;
+  releasedAt: string;
+  clientAddress: string;
+}
+
+export interface MonthlyEarning {
+  month: string;      // "YYYY-MM"
+  totalXlm: number;
+}
+
+export interface EarningsData {
+  totalXlm: string;
+  payments: EarningPayment[];
+  monthly: MonthlyEarning[];
+}
+
+export async function fetchFreelancerEarnings(publicKey: string): Promise<EarningsData> {
+  const { data } = await api.get<{ success: boolean; data: EarningsData }>(
+    `/api/profiles/${encodeURIComponent(publicKey)}/earnings`
+  );
+  return data.data;
+}
+
+// ─── Dispute Evidence (Issue #223) ───────────────────────────────────────────
+
+export interface DisputeEvidence {
+  id: string;
+  uploaderAddress: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  ipfsCid: string;
+  gatewayUrl: string;
+  createdAt: string;
+}
+
+export interface DisputeDetail {
+  job: {
+    id: string;
+    title: string;
+    status: string;
+    client_address: string;
+    freelancer_address: string;
+    created_at: string;
+  };
+  evidence: DisputeEvidence[];
+}
+
+export async function fetchDisputeDetail(jobId: string): Promise<DisputeDetail> {
+  const { data } = await api.get<{ success: boolean; data: DisputeDetail }>(`/api/disputes/${jobId}`);
+  return data.data;
+}
+
+export async function uploadDisputeEvidence(jobId: string, file: File): Promise<DisputeEvidence> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post<{ success: boolean; data: DisputeEvidence }>(
+    `/api/disputes/${jobId}/evidence`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" }, timeout: 60000 }
+  );
+  return data.data;
+}
+
+// ─── WebAuthn / Passkeys (Issue #218) ────────────────────────────────────────
+
+export interface PasskeyCredential {
+  id: string;
+  credential_name: string;
+  created_at: string;
+}
+
+export async function fetchPasskeyRegistrationOptions(publicKey: string) {
+  const { data } = await api.post<{ success: boolean; data: any }>("/api/webauthn/register-options", { publicKey });
+  return data.data;
+}
+
+export async function verifyPasskeyRegistration(credential: any, name: string) {
+  const { data } = await api.post<{ success: boolean; message: string }>("/api/webauthn/register-verify", { credential, name });
+  return data;
+}
+
+export async function fetchPasskeyLoginOptions(publicKey: string) {
+  const { data } = await api.post<{ success: boolean; data: any }>("/api/webauthn/login-options", { publicKey });
+  return data.data;
+}
+
+export async function verifyPasskeyLogin(credential: any, publicKey: string) {
+  const { data } = await api.post<{ success: boolean; token: string }>("/api/webauthn/login-verify", { credential, publicKey });
+  return data;
+}
+
+export async function fetchPasskeyCredentials(): Promise<PasskeyCredential[]> {
+  const { data } = await api.get<{ success: boolean; data: PasskeyCredential[] }>("/api/webauthn/credentials");
+  return data.data;
+}
+
+export async function deletePasskeyCredential(id: string) {
+  await api.delete(`/api/webauthn/credentials/${id}`);
+}
+

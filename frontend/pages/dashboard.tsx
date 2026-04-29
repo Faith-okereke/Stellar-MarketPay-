@@ -17,18 +17,140 @@ import WithdrawToBankModal, {
   loadWithdrawHistory,
   type WithdrawHistoryEntry,
 } from "@/components/WithdrawToBankModal";
+import PasskeyManager from "@/components/PasskeyManager";
 import { useToast } from "@/components/Toast";
+import { usePriceContext } from "@/contexts/PriceContext";
 import clsx from "clsx";
 import JobAnalytics from "@/components/JobAnalytics";
+import { fetchFreelancerEarnings, EarningsData } from "@/lib/api";
 
 const LOW_BALANCE_THRESHOLD_XLM = 5;
+
+// ─── EarningsTab ──────────────────────────────────────────────────────────────
+
+function MonthlyBarChart({ monthly }: { monthly: { month: string; totalXlm: number }[] }) {
+  if (!monthly.length) return null;
+  const max = Math.max(...monthly.map((m) => m.totalXlm), 0.001);
+  return (
+    <div className="flex items-end gap-2 h-28" role="img" aria-label="Monthly earnings bar chart">
+      {monthly.map((m) => {
+        const pct = (m.totalXlm / max) * 100;
+        const [year, mon] = m.month.split("-");
+        const label = new Date(Number(year), Number(mon) - 1).toLocaleString("default", { month: "short" });
+        return (
+          <div key={m.month} className="flex flex-col items-center gap-1 flex-1">
+            <span className="text-[10px] text-market-400 font-mono">{m.totalXlm.toFixed(2)}</span>
+            <div
+              className="w-full rounded-t-md bg-market-500/60 border border-market-400/30 transition-all"
+              style={{ height: `${Math.max(pct, 4)}%` }}
+              title={`${m.month}: ${m.totalXlm.toFixed(4)} XLM`}
+            />
+            <span className="text-[10px] text-amber-800">{label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+interface EarningsTabProps {
+  publicKey: string;
+  earnings: EarningsData | null;
+  loading: boolean;
+  xlmPriceUsd: number | null;
+}
+
+function EarningsTab({ earnings, loading, xlmPriceUsd }: EarningsTabProps) {
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => <div key={i} className="card animate-pulse h-20" />)}
+      </div>
+    );
+  }
+
+  if (!earnings || earnings.payments.length === 0) {
+    return (
+      <div className="card text-center py-16">
+        <p className="font-display text-xl text-amber-100 mb-2">No earnings yet</p>
+        <p className="text-amber-800 text-sm">Complete your first job to see your XLM earnings here.</p>
+      </div>
+    );
+  }
+
+  const totalXlm = parseFloat(earnings.totalXlm);
+  const totalUsd = xlmPriceUsd ? (totalXlm * xlmPriceUsd).toFixed(2) : null;
+
+  return (
+    <div className="space-y-6">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div className="card bg-gradient-to-br from-ink-800 to-ink-900 border-market-500/18">
+          <p className="label mb-1">Total Earned</p>
+          <p className="font-display text-2xl font-bold text-market-400">
+            {totalXlm.toLocaleString("en-US", { maximumFractionDigits: 4 })}
+            <span className="text-lg ml-1.5">XLM</span>
+          </p>
+          {totalUsd && (
+            <p className="text-xs text-amber-800 mt-1">≈ ${totalUsd} USD</p>
+          )}
+        </div>
+        <div className="card bg-gradient-to-br from-ink-800 to-ink-900 border-market-500/18">
+          <p className="label mb-1">Completed Jobs</p>
+          <p className="font-display text-2xl font-bold text-amber-100">{earnings.payments.length}</p>
+        </div>
+        {xlmPriceUsd && (
+          <div className="card bg-gradient-to-br from-ink-800 to-ink-900 border-market-500/18">
+            <p className="label mb-1">XLM Price</p>
+            <p className="font-display text-2xl font-bold text-amber-100">
+              ${xlmPriceUsd.toFixed(4)}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Monthly chart */}
+      {earnings.monthly.length > 0 && (
+        <div className="card space-y-4">
+          <p className="text-xs uppercase tracking-wider text-amber-800/70">Monthly earnings (last 6 months)</p>
+          <MonthlyBarChart monthly={earnings.monthly} />
+        </div>
+      )}
+
+      {/* Payment history */}
+      <div className="space-y-2">
+        <p className="text-xs uppercase tracking-wider text-amber-800/70">Payment history</p>
+        {earnings.payments.map((p) => {
+          const xlm = parseFloat(p.amountXlm);
+          const usd = xlmPriceUsd ? (xlm * xlmPriceUsd).toFixed(2) : null;
+          return (
+            <div key={p.id} className="card-hover flex items-center justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="font-display font-semibold text-amber-100 truncate">{p.jobTitle}</p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  {p.releasedAt ? new Date(p.releasedAt).toLocaleDateString() : "—"}
+                </p>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <p className="font-mono font-semibold text-market-400">
+                  +{xlm.toLocaleString("en-US", { maximumFractionDigits: 4 })} XLM
+                </p>
+                {usd && <p className="text-xs text-amber-800">≈ ${usd}</p>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 interface DashboardProps {
   publicKey: string | null;
   onConnect: (pk: string) => void;
 }
 
-type Tab = "posted" | "applied" | "send" | "edit_profile" | "templates" | "price_alerts" | "withdrawals";
+type Tab = "posted" | "applied" | "send" | "edit_profile" | "templates" | "price_alerts" | "withdrawals" | "earnings" | "security";
 const REPOST_JOB_PREFILL_STORAGE_KEY = "marketpay_repost_job_prefill";
 
 export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
@@ -55,7 +177,10 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [showBuyXLM, setShowBuyXLM] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawHistory, setWithdrawHistory] = useState<WithdrawHistoryEntry[]>([]);
+  const [earnings, setEarnings] = useState<EarningsData | null>(null);
+  const [earningsLoading, setEarningsLoading] = useState(false);
   const { info, success } = useToast();
+  const { xlmPriceUsd } = usePriceContext();
 
   const isRepostable = (status: Job["status"]) => status === "expired" || status === "cancelled";
 
@@ -196,6 +321,15 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   }, [showWithdraw]);
 
   useEffect(() => {
+    if (tab !== "earnings" || !publicKey || earnings) return;
+    setEarningsLoading(true);
+    fetchFreelancerEarnings(publicKey)
+      .then(setEarnings)
+      .catch(() => {})
+      .finally(() => setEarningsLoading(false));
+  }, [tab, publicKey, earnings]);
+
+  useEffect(() => {
     if (!publicKey) return;
     fetchProposalTemplates().then(setTemplates).catch(() => {});
     fetchPriceAlertPreference(publicKey).then((pref) => {
@@ -325,14 +459,14 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       )}
 
       <div className="flex border-b border-market-500/10 mb-6 overflow-x-auto">
-        {(["posted", "applied", "send", "edit_profile", "templates", "price_alerts", "withdrawals"] as Tab[]).map((t) => (
+        {(["posted", "applied", "earnings", "send", "edit_profile", "templates", "price_alerts", "withdrawals", "security"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={clsx(
               "px-6 py-3 text-sm font-medium transition-all border-b-2 -mb-px whitespace-nowrap flex items-center gap-2",
               tab === t ? "border-market-400 text-market-300" : "border-transparent text-amber-700 hover:text-amber-400"
             )}>
-            {t === "posted"    ? `Jobs Posted (${myJobs.length})` :
-             t === "applied"   ? (
+            {t === "posted"       ? `Jobs Posted (${myJobs.length})` :
+             t === "applied"      ? (
                <>
                  <span>Applications</span>
                  {unreadCount > 0 && (
@@ -342,8 +476,14 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                  )}
                </>
              ) :
-             t === "send"      ? "Send Payment" :
-             "Edit Profile"}
+             t === "earnings"     ? "Earnings" :
+             t === "send"         ? "Send Payment" :
+             t === "edit_profile" ? "Edit Profile" :
+             t === "templates"    ? "Templates" :
+             t === "price_alerts" ? "Price Alerts" :
+             t === "withdrawals"  ? "Withdrawals" :
+             t === "security"     ? "Security" :
+             t}
           </button>
         ))}
       </div>
@@ -634,6 +774,15 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
             ))}
           </div>
         )
+      ) : tab === "earnings" ? (
+        <EarningsTab
+          publicKey={publicKey}
+          earnings={earnings}
+          loading={earningsLoading}
+          xlmPriceUsd={xlmPriceUsd}
+        />
+      ) : tab === "security" ? (
+        <PasskeyManager publicKey={publicKey} />
       ) : tab === "edit_profile" ? (
         <EditProfileForm publicKey={publicKey} />
       ) : null}

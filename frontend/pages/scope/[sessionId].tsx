@@ -4,11 +4,14 @@ import { useRouter } from "next/router";
 type CursorMap = Record<string, { start: number; end: number; updatedAt: number }>;
 
 type ScopeMessage =
-  | { event: "scope:init"; payload: { sessionId: string; participantId: string; content: string; cursors: CursorMap } }
+  | { event: "scope:init"; payload: { sessionId: string; participantId: string; content: string; cursors: CursorMap; finalized?: boolean } }
   | { event: "scope:update"; payload: { sessionId: string; content: string; cursors: CursorMap } }
   | { event: "scope:finalized"; payload: { sessionId: string; content: string; payload?: Record<string, string> } }
   | { event: "scope:error"; payload: { error: string } }
   | { event: "connected"; payload: { channel: string } };
+
+// Distinct colours for up to 6 peer cursors
+const CURSOR_COLORS = ["#f59e0b", "#34d399", "#60a5fa", "#f472b6", "#a78bfa", "#fb923c"];
 
 const PREFILL_KEY = "marketpay_scope_prefill";
 
@@ -31,8 +34,10 @@ export default function ScopeSessionPage() {
   const [status, setStatus] = useState("Connecting...");
   const [shareUrl, setShareUrl] = useState("");
   const [error, setError] = useState("");
-  const socketRef = useRef<WebSocket | null>(null);
+  const [finalized, setFinalized] = useState(false);
+  const socketRef   = useRef<WebSocket | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const saveTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!router.isReady) return;
@@ -68,6 +73,7 @@ export default function ScopeSessionPage() {
           setDocumentText(msg.payload.content || "");
           setCursors(msg.payload.cursors || {});
           setParticipantId(msg.payload.participantId);
+          if (msg.payload.finalized) setFinalized(true);
           return;
         }
         if (msg.event === "scope:update") {
@@ -77,7 +83,8 @@ export default function ScopeSessionPage() {
         }
         if (msg.event === "scope:finalized") {
           setDocumentText(msg.payload.content || "");
-          setStatus("Scope finalized");
+          setFinalized(true);
+          setStatus("Scope finalized — document is now locked");
           return;
         }
         if (msg.event === "scope:error") {
@@ -114,11 +121,14 @@ export default function ScopeSessionPage() {
   };
 
   const handleTextChange = (value: string) => {
+    if (finalized) return;
     setDocumentText(value);
-    const el = textareaRef.current;
-    const start = el?.selectionStart || 0;
-    const end = el?.selectionEnd || 0;
-    sendUpdate(value, start, end);
+    // Debounce WS send to ~2 seconds to avoid per-keystroke saves
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const el = textareaRef.current;
+      sendUpdate(value, el?.selectionStart || 0, el?.selectionEnd || 0);
+    }, 2000);
   };
 
   const finalizeScope = () => {
@@ -147,17 +157,32 @@ export default function ScopeSessionPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="font-display text-2xl font-bold text-amber-100">Scope Collaboration Session</h1>
-            <p className="text-sm text-amber-800">Live status: {status}</p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`w-2 h-2 rounded-full ${finalized ? "bg-emerald-400" : status === "Connected" ? "bg-emerald-400 animate-pulse" : "bg-amber-600"}`} />
+              <p className="text-sm text-amber-800">{status}</p>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={finalizeScope}
-            className="btn-primary px-4 py-2 text-sm"
-            disabled={!documentText.trim()}
-          >
-            Finalize Scope
-          </button>
+          {!finalized && (
+            <button
+              type="button"
+              onClick={finalizeScope}
+              className="btn-primary px-4 py-2 text-sm"
+              disabled={!documentText.trim()}
+            >
+              Finalize Scope
+            </button>
+          )}
         </div>
+
+        {finalized && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 flex items-center gap-3">
+            <span className="text-emerald-400 text-lg">✓</span>
+            <div>
+              <p className="text-sm font-medium text-emerald-300">Scope finalized</p>
+              <p className="text-xs text-emerald-600">This document is locked and has been used to create the job.</p>
+            </div>
+          </div>
+        )}
 
         <div className="rounded-xl border border-market-500/20 bg-market-900/30 p-4 space-y-2">
           <p className="text-xs uppercase tracking-wider text-amber-800/70">Share this session URL</p>
@@ -169,35 +194,47 @@ export default function ScopeSessionPage() {
           </div>
         </div>
 
+        {/* Live presence indicators */}
+        {activePeerCursors.length > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <p className="text-xs text-amber-800/70 uppercase tracking-wider">Online:</p>
+            {activePeerCursors.map(([peerId], idx) => (
+              <span
+                key={peerId}
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium"
+                style={{
+                  background: `${CURSOR_COLORS[idx % CURSOR_COLORS.length]}18`,
+                  color: CURSOR_COLORS[idx % CURSOR_COLORS.length],
+                  border: `1px solid ${CURSOR_COLORS[idx % CURSOR_COLORS.length]}40`,
+                }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: CURSOR_COLORS[idx % CURSOR_COLORS.length] }} />
+                {peerId.slice(0, 8)}
+              </span>
+            ))}
+          </div>
+        )}
+
         <div>
-          <label className="label">Shared Scope Document</label>
+          <label className="label">
+            Shared Scope Document
+            {!finalized && <span className="ml-2 text-xs text-amber-800 font-normal">(auto-saves every 2s)</span>}
+          </label>
           <textarea
             ref={textareaRef}
             value={documentText}
             onChange={(e) => handleTextChange(e.target.value)}
             onSelect={(e) => {
+              if (finalized) return;
               const target = e.target as HTMLTextAreaElement;
               sendUpdate(documentText, target.selectionStart, target.selectionEnd);
             }}
             rows={16}
             className="textarea-field"
             placeholder="Write requirements, milestones, and acceptance criteria together..."
+            readOnly={finalized}
+            disabled={finalized}
           />
-        </div>
-
-        <div className="rounded-xl border border-market-500/20 bg-market-900/30 p-4">
-          <p className="text-xs uppercase tracking-wider text-amber-800/70 mb-3">Live collaborator cursors</p>
-          {activePeerCursors.length === 0 ? (
-            <p className="text-sm text-amber-800">No other active collaborator right now.</p>
-          ) : (
-            <div className="space-y-2">
-              {activePeerCursors.map(([peerId, cursor]) => (
-                <p key={peerId} className="text-sm text-amber-100">
-                  {peerId}: selection {cursor.start} to {cursor.end}
-                </p>
-              ))}
-            </div>
-          )}
         </div>
 
         {error && <p className="text-sm text-red-400">{error}</p>}

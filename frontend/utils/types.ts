@@ -9,7 +9,7 @@ export type Currency  = "XLM" | "USDC";
 export type JobVisibility = "public" | "private" | "invite_only";
 export type FreelancerTier = "Newcomer" | "Rising Star" | "Expert" | "Top Talent";
 export type AvailabilityStatus = "available" | "busy" | "unavailable";
-export type FreelancerTier = "Newcomer" | "Rising Star" | "Expert" | "Top Talent";
+export type PortfolioItemType = "link" | "image" | "pdf";
 
 export interface PortfolioItem {
   title: string;
@@ -142,4 +142,26 @@ export interface Message {
   content: string;
   read: boolean;
   createdAt: string;
+}
+
+export interface PortfolioFile {
+  cid: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  uploadedAt: string;
+}
+
+export interface TokenInfo {
+  contractId: string;
+  name: string;
+  symbol: string;
+  decimals: number;
+  logoUrl?: string;
+}
+
+export interface TokenBalance {
+  contractId: string;
+  balance: string;
+  symbol: string;
 }
