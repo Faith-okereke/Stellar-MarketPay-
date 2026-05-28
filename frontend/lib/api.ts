@@ -520,8 +520,48 @@ export async function fetchDraft(draftId: string) {
   return data.data;
 }
 
+export async function saveDraft(draft: {
+  id?: string;
+  title?: string;
+  description?: string;
+  budget?: number;
+  category?: string;
+  skills?: string[];
+  deadline?: string;
+}) {
+  const { data } = await api.post<{ success: boolean; data: { id: string } }>("/api/jobs/drafts", draft);
+  return data.data;
+}
+
 export async function deleteDraft(draftId: string) {
   await api.delete(`/api/jobs/drafts/${draftId}`);
+}
+
+// ─── Admin 2FA ────────────────────────────────────────────────────────────────
+
+export async function fetchAdmin2FAStatus() {
+  const { data } = await api.get<{
+    success: boolean;
+    data: { totp_enabled: boolean; verified: boolean };
+  }>("/api/admin/2fa/status");
+  return data.data;
+}
+
+export async function setupAdmin2FA() {
+  const { data } = await api.post<{
+    success: boolean;
+    data: { qrCode: string; manualEntryKey: string };
+  }>("/api/admin/2fa/setup");
+  return data.data;
+}
+
+export async function verifyAdmin2FA(token: string, setup = false) {
+  const { data } = await api.post<{
+    success: boolean;
+    token?: string;
+    data: { backupCodes?: string[]; message?: string };
+  }>("/api/admin/2fa/verify", { token, setup });
+  return { token: data.token, backupCodes: data.data?.backupCodes, message: data.data?.message };
 }
 
 // ─── Job Recommendations (Issue #221) ───────────────────────────────────

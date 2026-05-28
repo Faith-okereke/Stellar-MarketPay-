@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getPublicKey } from "@stellar/freighter-api";
 import { createEscrowOnChain } from "@/lib/stellar";
+import { saveDraft, deleteDraft } from "@/lib/api";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+const DRAFT_STORAGE_KEY = "marketpay_post_job_draft";
+const AUTOSAVE_INTERVAL_MS = 30_000;
 
 interface JobFormData {
   title: string;
@@ -25,9 +25,11 @@ interface StepState {
   errorMessage?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Step progress indicator
-// ---------------------------------------------------------------------------
+interface PostJobFormProps {
+  publicKey: string;
+  initialCategory?: string;
+  suggestedFreelancer?: string;
+}
 
 const STEPS = [
   { id: "posting", label: "Posting Job" },
@@ -46,137 +48,14 @@ function ProgressBar({ step }: { step: Step }) {
   const active = StepIndex(step);
   const isError = step === "error";
 
-  const handleConfirmEscrowFee = async () => {
-    if (!pendingEscrow) return;
-    const { transaction, jobId } = pendingEscrow;
-    setPendingEscrow(null);
-
-    try {
-      const { signedXDR, error: signError } = await signTransactionWithWallet(transaction.toXDR());
-      if (signError || !signedXDR) {
-        await deleteJob(jobId).catch(() => {});
-        throw new Error(signError || "Freighter signing was cancelled");
-      }
-
-      const txHash = await submitSorobanTransaction(signedXDR).catch(async (e) => {
-        await deleteJob(jobId).catch(() => {});
-        throw e;
-      });
-
-      // Log the actual fee charged for the AC.
-      fetchActualFee(txHash).then((actual) => {
-        if (actual) {
-          // eslint-disable-next-line no-console
-          console.info(`[escrow] create_escrow ${jobId} actual fee ${actual.feeChargedXlm} XLM`);
-        }
-      }).catch(() => {});
-
-      await updateJobEscrowId(jobId, txHash);
-
-      setStep("done");
-      toast.success("Job posted and budget locked in escrow.");
-      router.push(`/jobs/${jobId}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setError(msg);
-      setStep("error");
-      toast.error(`Failed: ${msg}`);
-      setLoading(false);
-    }
-  };
-
-  const handleCancelEscrowFee = async () => {
-    if (!pendingEscrow) return;
-    const { jobId } = pendingEscrow;
-    setPendingEscrow(null);
-    await deleteJob(jobId).catch(() => {});
-    setStep("idle");
-    setLoading(false);
-    setError("Cancelled before signing — the orphaned job was removed.");
-  };
-
-  const handleLoadTemplate = (name: string) => {
-    const template = templates.find((t) => t.name === name);
-    if (template) {
-      setForm((f) => ({
-        ...f,
-        title: template.title,
-        description: template.description,
-        budget: template.budget,
-        category: template.category,
-        deadline: template.deadline,
-      }));
-      setSkills(template.skills);
-      setSelectedTemplateName(name);
-    }
-  };
-
-  const handleSaveTemplate = () => {
-    if (!templateNameInput.trim()) {
-      setTemplateError("Template name is required");
-      return;
-    }
-    const existing = templates.find((t) => t.name === templateNameInput);
-    if (existing) {
-      setPendingOverwriteTemplate(existing);
-      return;
-    }
-    const newTemplate: JobTemplate = {
-      name: templateNameInput, title: form.title, description: form.description,
-      budget: form.budget, category: form.category, skills, deadline: form.deadline,
-    };
-    const updated = [...templates, newTemplate];
-    setTemplates(updated);
-    localStorage.setItem(JOB_TEMPLATES_STORAGE_KEY, JSON.stringify(updated));
-    setTemplateNameInput("");
-    setTemplateError(null);
-    toast.success(`Template "${templateNameInput}" saved`);
-  };
-
-  const handleConfirmOverwrite = () => {
-    const updated = templates.map((t) =>
-      t.name === templateNameInput
-        ? { ...t, title: form.title, description: form.description, budget: form.budget, category: form.category, skills, deadline: form.deadline }
-        : t
-    );
-    setTemplates(updated);
-    localStorage.setItem(JOB_TEMPLATES_STORAGE_KEY, JSON.stringify(updated));
-    setTemplateNameInput("");
-    setPendingOverwriteTemplate(null);
-    toast.success("Template updated");
-  };
-
-  const handleCancelOverwrite = () => setPendingOverwriteTemplate(null);
-
-  const handleDeleteTemplate = () => setShowDeleteConfirmation(true);
-
-  const handleConfirmDelete = () => {
-    const updated = templates.filter((t) => t.name !== selectedTemplateName);
-    setTemplates(updated);
-    localStorage.setItem(JOB_TEMPLATES_STORAGE_KEY, JSON.stringify(updated));
-    setSelectedTemplateName("");
-    setShowDeleteConfirmation(false);
-    toast.success("Template deleted");
-  };
-
-  const handleCancelDelete = () => setShowDeleteConfirmation(false);
-
   return (
     <div className="w-full my-6">
       <div className="flex items-center justify-between relative">
-        {/* Connector line */}
         <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0.5 bg-gray-200 z-0" />
         <div
           className="absolute left-0 top-1/2 -translate-y-1/2 h-0.5 bg-indigo-500 z-0 transition-all duration-700"
           style={{
-            width:
-              active < 0
-                ? "0%"
-                : active === 0
-                ? "0%"
-                : active === 1
-                ? "50%"
-                : "100%",
+            width: active < 0 ? "0%" : active === 0 ? "0%" : active === 1 ? "50%" : "100%",
           }}
         />
 
@@ -186,10 +65,7 @@ function ProgressBar({ step }: { step: Step }) {
           const errored = isError && current;
 
           return (
-            <div
-              key={s.id}
-              className="flex flex-col items-center gap-2 z-10"
-            >
+            <div key={s.id} className="flex flex-col items-center gap-2 z-10">
               <div
                 className={[
                   "w-9 h-9 rounded-full flex items-center justify-center border-2 text-sm font-bold transition-all duration-500",
@@ -202,26 +78,12 @@ function ProgressBar({ step }: { step: Step }) {
                     : "bg-white border-gray-300 text-gray-400",
                 ].join(" ")}
               >
-                {done ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : errored ? (
-                  "✕"
-                ) : (
-                  i + 1
-                )}
+                {done ? "✓" : errored ? "✕" : i + 1}
               </div>
               <span
                 className={[
                   "text-xs font-medium whitespace-nowrap",
-                  done
-                    ? "text-indigo-600"
-                    : current && !errored
-                    ? "text-indigo-500"
-                    : errored
-                    ? "text-red-500"
-                    : "text-gray-400",
+                  done ? "text-indigo-600" : current && !errored ? "text-indigo-500" : errored ? "text-red-500" : "text-gray-400",
                 ].join(" ")}
               >
                 {s.label}
@@ -230,51 +92,139 @@ function ProgressBar({ step }: { step: Step }) {
           );
         })}
       </div>
-
-      {pendingEscrow && (
-        <FeeEstimationModal
-          transaction={pendingEscrow.transaction}
-          functionName="create_escrow"
-          payerPublicKey={publicKey}
-          onConfirm={handleConfirmEscrowFee}
-          onCancel={handleCancelEscrowFee}
-        />
-      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main component
-// ---------------------------------------------------------------------------
+function loadLocalDraft(): JobFormData | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as JobFormData;
+  } catch {
+    return null;
+  }
+}
 
-export default function PostJobForm() {
-  const [form, setForm] = useState<JobFormData>({
-    title: "",
-    description: "",
-    budgetXlm: 50,
-    skills: "",
-    deadline: "",
-  });
+function hasFormContent(form: JobFormData): boolean {
+  return Boolean(
+    form.title.trim() ||
+      form.description.trim() ||
+      form.skills.trim() ||
+      form.deadline ||
+      form.budgetXlm !== 50
+  );
+}
 
+const defaultForm: JobFormData = {
+  title: "",
+  description: "",
+  budgetXlm: 50,
+  skills: "",
+  deadline: "",
+};
+
+export default function PostJobForm({ publicKey, initialCategory = "" }: PostJobFormProps) {
+  const [form, setForm] = useState<JobFormData>(defaultForm);
   const [stepState, setStepState] = useState<StepState>({ current: "idle" });
   const [submitting, setSubmitting] = useState(false);
+  const [showDraftBanner, setShowDraftBanner] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<JobFormData | null>(null);
+  const [serverDraftId, setServerDraftId] = useState<string | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  const isInProgress =
-    stepState.current === "posting" || stepState.current === "escrow";
+  const formRef = useRef(form);
+  formRef.current = form;
 
-  // -------------------------------------------------------------------------
-  // Handlers
-  // -------------------------------------------------------------------------
+  const isInProgress = stepState.current === "posting" || stepState.current === "escrow";
 
-  function handleChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) {
+  useEffect(() => {
+    const local = loadLocalDraft();
+    if (local && hasFormContent(local)) {
+      setPendingDraft(local);
+      setShowDraftBanner(true);
+    }
+  }, []);
+
+  const persistDraft = useCallback(async () => {
+    const current = formRef.current;
+    if (!hasFormContent(current)) return;
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(current));
+    }
+
+    try {
+      const skills = current.skills
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const saved = await saveDraft({
+        id: serverDraftId || undefined,
+        title: current.title,
+        description: current.description,
+        budget: current.budgetXlm,
+        category: initialCategory || "general",
+        skills,
+        deadline: current.deadline || undefined,
+      });
+      if (saved?.id) setServerDraftId(saved.id);
+      setLastSavedAt(new Date());
+    } catch {
+      setLastSavedAt(new Date());
+    }
+  }, [serverDraftId, initialCategory]);
+
+  useEffect(() => {
+    if (isInProgress || stepState.current === "complete") return;
+
+    const interval = setInterval(() => {
+      persistDraft();
+    }, AUTOSAVE_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [isInProgress, stepState.current, persistDraft]);
+
+  const clearDraft = useCallback(async () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    }
+    if (serverDraftId) {
+      try {
+        await deleteDraft(serverDraftId);
+      } catch {
+        // ignore
+      }
+      setServerDraftId(null);
+    }
+  }, [serverDraftId]);
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     const { name, value } = e.target;
     setForm((prev) => ({
       ...prev,
       [name]: name === "budgetXlm" ? Number(value) : value,
     }));
+  }
+
+  function handleRestoreDraft() {
+    if (pendingDraft) {
+      setForm(pendingDraft);
+    }
+    setShowDraftBanner(false);
+    setPendingDraft(null);
+  }
+
+  function handleDiscardDraft() {
+    const toDiscard = pendingDraft || form;
+    if (hasFormContent(toDiscard) && !window.confirm("Discard your unsaved draft? This cannot be undone.")) {
+      return;
+    }
+    void clearDraft();
+    setForm(defaultForm);
+    setShowDraftBanner(false);
+    setPendingDraft(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -287,7 +237,6 @@ export default function PostJobForm() {
     let jobId: string | undefined;
 
     try {
-      // ── Step 1: POST to backend ──────────────────────────────────────────
       const createRes = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -300,21 +249,21 @@ export default function PostJobForm() {
             .map((s) => s.trim())
             .filter(Boolean),
           deadline: form.deadline,
+          clientAddress: publicKey,
         }),
       });
 
       if (!createRes.ok) {
         const err = await createRes.json().catch(() => ({}));
-        throw new Error(err?.message ?? "Failed to create job");
+        throw new Error(err?.message ?? err?.error ?? "Failed to create job");
       }
 
-      const { job } = await createRes.json();
+      const body = await createRes.json();
+      const job = body.job ?? body.data;
       jobId = job.id as string;
 
-      // ── Step 2: Lock escrow on-chain ─────────────────────────────────────
       setStepState({ current: "escrow", jobId });
 
-      // Resolve the client's Freighter public key
       const { publicKey: clientPublicKey } = await getPublicKey();
 
       const { txHash } = await createEscrowOnChain({
@@ -323,25 +272,22 @@ export default function PostJobForm() {
         budgetXlm: form.budgetXlm,
       });
 
-      // ── Step 2b: Store the contract tx hash in the job record ────────────
       await fetch(`/api/jobs/${jobId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contractTxHash: txHash }),
       });
 
-      // ── Step 3: Done ─────────────────────────────────────────────────────
+      await clearDraft();
       setStepState({ current: "complete", jobId, txHash });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "An unexpected error occurred.";
+      const message = err instanceof Error ? err.message : "An unexpected error occurred.";
 
-      // Roll back the job if it was created but escrow failed
       if (jobId) {
         try {
           await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
         } catch {
-          // Best-effort rollback; ignore secondary failures
+          // best-effort rollback
         }
       }
 
@@ -357,75 +303,26 @@ export default function PostJobForm() {
 
   function handleReset() {
     setStepState({ current: "idle" });
-    setForm({
-      title: "",
-      description: "",
-      budgetXlm: 50,
-      skills: "",
-      deadline: "",
-    });
+    setForm(defaultForm);
   }
-
-  // -------------------------------------------------------------------------
-  // Render: success state
-  // -------------------------------------------------------------------------
 
   if (stepState.current === "complete") {
     return (
       <div className="max-w-lg mx-auto bg-white rounded-2xl shadow-lg p-8 text-center space-y-4">
         <ProgressBar step="complete" />
-
-        <div className="flex flex-col items-center gap-3 pt-2">
-          <div className="w-16 h-16 rounded-full bg-indigo-100 flex items-center justify-center">
-            <svg className="w-8 h-8 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900">Job Posted!</h2>
-          <p className="text-gray-500 text-sm">
-            Your budget of{" "}
-            <span className="font-semibold text-indigo-600">
-              {form.budgetXlm} XLM
-            </span>{" "}
-            has been locked in the escrow contract.
-          </p>
-        </div>
-
+        <h2 className="text-2xl font-bold text-gray-900">Job Posted!</h2>
+        <p className="text-gray-500 text-sm">
+          Your budget of <span className="font-semibold text-indigo-600">{form.budgetXlm} XLM</span> has been locked in escrow.
+        </p>
         {stepState.txHash && (
-          <div className="bg-gray-50 rounded-xl p-4 text-left space-y-1">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              Contract Transaction Hash
-            </p>
-            <p className="text-xs font-mono text-gray-800 break-all">
-              {stepState.txHash}
-            </p>
-            <a
-              href={`https://stellar.expert/explorer/testnet/tx/${stepState.txHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-indigo-500 hover:underline inline-flex items-center gap-1"
-            >
-              View on Stellar Expert
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-          </div>
+          <p className="text-xs font-mono text-gray-600 break-all">{stepState.txHash}</p>
         )}
-
-        <button
-          onClick={handleReset}
-          className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors text-sm"
-        >
+        <button type="button" onClick={handleReset} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-semibold text-sm">
           Post Another Job
         </button>
       </div>
     );
   }
-
-  // -------------------------------------------------------------------------
-  // Render: form + in-progress overlay
-  // -------------------------------------------------------------------------
 
   return (
     <div className="max-w-lg mx-auto bg-white rounded-2xl shadow-lg p-8">
@@ -434,37 +331,39 @@ export default function PostJobForm() {
         Your XLM budget will be locked in a Soroban escrow contract on-chain.
       </p>
 
-      {/* 3-step progress (shown while submitting) */}
+      {showDraftBanner && pendingDraft && (
+        <div className="mb-5 rounded-xl border border-market-500/30 bg-market-500/8 p-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-amber-200">You have an unsaved draft.</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={handleRestoreDraft} className="text-sm font-semibold text-market-400 hover:text-market-300">
+              Restore
+            </button>
+            <button type="button" onClick={handleDiscardDraft} className="text-sm text-amber-800 hover:text-amber-600">
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {lastSavedAt && !showDraftBanner && (
+        <p className="text-xs text-gray-400 mb-4">Draft auto-saved at {lastSavedAt.toLocaleTimeString()}</p>
+      )}
+
       {isInProgress && <ProgressBar step={stepState.current} />}
 
-      {/* Error banner */}
       {stepState.current === "error" && (
-        <div className="mb-5 rounded-xl bg-red-50 border border-red-200 p-4 space-y-1">
-          <ProgressBar step={stepState.current} />
-          <p className="text-sm font-semibold text-red-700">
-            Something went wrong
-          </p>
+        <div className="mb-5 rounded-xl bg-red-50 border border-red-200 p-4">
+          <p className="text-sm font-semibold text-red-700">Something went wrong</p>
           <p className="text-xs text-red-600">{stepState.errorMessage}</p>
-          {stepState.jobId && (
-            <p className="text-xs text-red-500">
-              The job record has been rolled back. Please try again.
-            </p>
-          )}
-          <button
-            onClick={() => setStepState({ current: "idle" })}
-            className="mt-2 text-xs text-red-600 underline"
-          >
+          <button type="button" onClick={() => setStepState({ current: "idle" })} className="mt-2 text-xs text-red-600 underline">
             Dismiss and retry
           </button>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        {/* Title */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Job Title
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
           <input
             name="title"
             value={form.title}
@@ -472,15 +371,12 @@ export default function PostJobForm() {
             required
             disabled={isInProgress}
             placeholder="e.g. Build a Soroban DEX interface"
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent disabled:opacity-60"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm disabled:opacity-60"
           />
         </div>
 
-        {/* Description */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Description
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
           <textarea
             name="description"
             value={form.description}
@@ -489,76 +385,53 @@ export default function PostJobForm() {
             rows={4}
             disabled={isInProgress}
             placeholder="Describe the work, deliverables, and any context..."
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent disabled:opacity-60 resize-none"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm disabled:opacity-60 resize-none"
           />
         </div>
 
-        {/* Budget */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Budget (XLM)
-          </label>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-indigo-500">
-              XLM
-            </span>
-            <input
-              name="budgetXlm"
-              type="number"
-              min={1}
-              step={1}
-              value={form.budgetXlm}
-              onChange={handleChange}
-              required
-              disabled={isInProgress}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-14 pr-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent disabled:opacity-60"
-            />
-          </div>
-          <p className="mt-1 text-xs text-gray-400">
-            This exact amount will be deducted from your wallet and held in escrow.
-          </p>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Budget (XLM)</label>
+          <input
+            name="budgetXlm"
+            type="number"
+            min={1}
+            step={1}
+            value={form.budgetXlm}
+            onChange={handleChange}
+            required
+            disabled={isInProgress}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm disabled:opacity-60"
+          />
         </div>
 
-        {/* Skills */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Required Skills
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Required Skills</label>
           <input
             name="skills"
             value={form.skills}
             onChange={handleChange}
             disabled={isInProgress}
             placeholder="Rust, Soroban, TypeScript (comma-separated)"
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent disabled:opacity-60"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm disabled:opacity-60"
           />
         </div>
 
-        {/* Deadline */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Deadline
-          </label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
           <input
             name="deadline"
             type="date"
             value={form.deadline}
             onChange={handleChange}
             disabled={isInProgress}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent disabled:opacity-60"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm disabled:opacity-60"
           />
         </div>
 
-        {/* Submit */}
         <button
           type="submit"
           disabled={isInProgress}
-          className={[
-            "w-full py-3 rounded-xl font-semibold text-sm transition-all duration-200",
-            isInProgress
-              ? "bg-indigo-300 text-white cursor-not-allowed"
-              : "bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95",
-          ].join(" ")}
+          className="w-full py-3 rounded-xl font-semibold text-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
         >
           {stepState.current === "posting"
             ? "Posting job…"
@@ -566,14 +439,6 @@ export default function PostJobForm() {
             ? "Waiting for Freighter signature…"
             : `Post Job & Lock ${form.budgetXlm} XLM Escrow`}
         </button>
-
-        {isInProgress && (
-          <p className="text-center text-xs text-gray-400">
-            {stepState.current === "escrow"
-              ? "Please approve the transaction in your Freighter wallet."
-              : "Submitting your job to the platform…"}
-          </p>
-        )}
       </form>
     </div>
   );

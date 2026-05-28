@@ -6,6 +6,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const { Utils, Keypair } = require("@stellar/stellar-sdk");
 const { JWT_SECRET } = require("../middleware/auth");
+const { ensureAdminProfile, get2FAStatus } = require("../services/twoFactorService");
 
 const router = express.Router();
 
@@ -139,7 +140,21 @@ router.post("/", (req, res) => {
       "" // webAuthEndpoint is optional or typically HOME_DOMAIN if not specified differently
     );
 
-    const token = jwt.sign({ publicKey: accountId }, JWT_SECRET, { expiresIn: "24h" });
+    const adminAddresses = (process.env.ADMIN_WALLET_ADDRESSES || "")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    const isAdmin = adminAddresses.includes(accountId);
+
+    const payload = { publicKey: accountId };
+    if (isAdmin) {
+      await ensureAdminProfile(accountId);
+      payload.role = "admin";
+      const status = await get2FAStatus(accountId);
+      payload["2fa_verified"] = !status.totp_enabled;
+    }
+
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
     res.cookie("jwt", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

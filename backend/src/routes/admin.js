@@ -7,7 +7,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
-const { verifyJWT } = require("../middleware/auth");
+const { verifyJWT, requireAdmin2FA } = require("../middleware/auth");
 const { getJob, updateJobStatus } = require("../services/jobService");
 const { logContractInteraction } = require("../services/contractAuditService");
 
@@ -38,7 +38,7 @@ async function logAdminAction({ action, adminAddress, targetId, targetType, deta
 }
 
 // ── GET /api/admin/metrics — platform analytics dashboard ─────────────────────
-router.get("/metrics", verifyJWT, requireAdmin, async (req, res, next) => {
+router.get("/metrics", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { period = "30d" } = req.query;
     
@@ -178,7 +178,7 @@ router.get("/metrics", verifyJWT, requireAdmin, async (req, res, next) => {
 });
 
 // ── GET /api/admin/reports/jobs — list all flagged/reported jobs ───────────────
-router.get("/reports/jobs", verifyJWT, requireAdmin, async (req, res, next) => {
+router.get("/reports/jobs", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT jr.id, jr.job_id, jr.reporter_address, jr.category, jr.description,
@@ -196,7 +196,7 @@ router.get("/reports/jobs", verifyJWT, requireAdmin, async (req, res, next) => {
 });
 
 // ── GET /api/admin/disputes — list all open disputes ─────────────────────────
-router.get("/disputes", verifyJWT, requireAdmin, async (req, res, next) => {
+router.get("/disputes", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT e.job_id, e.status AS escrow_status, e.created_at AS escrow_created_at,
@@ -215,7 +215,7 @@ router.get("/disputes", verifyJWT, requireAdmin, async (req, res, next) => {
 });
 
 // ── GET /api/admin/reported-wallets — list reported user addresses ─────────────
-router.get("/reported-wallets", verifyJWT, requireAdmin, async (req, res, next) => {
+router.get("/reported-wallets", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT reporter_address AS reported_address, COUNT(*) AS report_count,
@@ -233,7 +233,7 @@ router.get("/reported-wallets", verifyJWT, requireAdmin, async (req, res, next) 
 });
 
 // ── GET /api/admin/logs — admin action audit log ───────────────────────────────
-router.get("/logs", verifyJWT, requireAdmin, async (req, res, next) => {
+router.get("/logs", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, action, admin_address, target_id, target_type, details, created_at
@@ -249,7 +249,7 @@ router.get("/logs", verifyJWT, requireAdmin, async (req, res, next) => {
 });
 
 // ── PATCH /api/admin/disputes/:jobId/resolve — mark dispute resolved ───────────
-router.patch("/disputes/:jobId/resolve", verifyJWT, requireAdmin, async (req, res, next) => {
+router.patch("/disputes/:jobId/resolve", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { jobId } = req.params;
     const { resolution, releaseTo } = req.body; // releaseTo: 'client' | 'freelancer'
@@ -293,7 +293,7 @@ router.patch("/disputes/:jobId/resolve", verifyJWT, requireAdmin, async (req, re
 });
 
 // ── PATCH /api/admin/jobs/:jobId/cancel — cancel a flagged job ─────────────────
-router.patch("/jobs/:jobId/cancel", verifyJWT, requireAdmin, async (req, res, next) => {
+router.patch("/jobs/:jobId/cancel", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { jobId } = req.params;
     const { reason } = req.body;
@@ -315,7 +315,7 @@ router.patch("/jobs/:jobId/cancel", verifyJWT, requireAdmin, async (req, res, ne
 });
 
 // ── POST /api/admin/wallets/:address/freeze — freeze a wallet ─────────────────
-router.post("/wallets/:address/freeze", verifyJWT, requireAdmin, async (req, res, next) => {
+router.post("/wallets/:address/freeze", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { address } = req.params;
     const { reason } = req.body;
@@ -346,7 +346,7 @@ router.post("/wallets/:address/freeze", verifyJWT, requireAdmin, async (req, res
 });
 
 // ── DELETE /api/admin/wallets/:address/freeze — unfreeze a wallet ─────────────
-router.delete("/wallets/:address/freeze", verifyJWT, requireAdmin, async (req, res, next) => {
+router.delete("/wallets/:address/freeze", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { address } = req.params;
     await pool.query("DELETE FROM frozen_wallets WHERE address = $1", [address]);
@@ -366,7 +366,7 @@ router.delete("/wallets/:address/freeze", verifyJWT, requireAdmin, async (req, r
 });
 
 // ── GET /api/admin/wallets/frozen — list frozen wallets ───────────────────────
-router.get("/wallets/frozen", verifyJWT, requireAdmin, async (req, res, next) => {
+router.get("/wallets/frozen", verifyJWT, requireAdmin, requireAdmin2FA, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       "SELECT address, reason, frozen_by, created_at FROM frozen_wallets ORDER BY created_at DESC"

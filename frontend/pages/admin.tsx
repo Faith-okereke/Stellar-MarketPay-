@@ -18,6 +18,8 @@ import {
 } from "@/lib/api";
 import { shortenAddress, timeAgo } from "@/utils/format";
 import AdminAnalytics from "@/components/AdminAnalytics";
+import Admin2FAModal from "@/components/Admin2FAModal";
+import { fetchAdmin2FAStatus } from "@/lib/api";
 
 // Wallet addresses with admin access — can also be overridden by env var
 const ADMIN_ADDRESSES = (
@@ -91,6 +93,8 @@ export default function AdminDashboard({ publicKey }: AdminPageProps) {
   const [freezeModal, setFreezeModal] = useState<{ address: string } | null>(null);
   const [freezeReason, setFreezeReason] = useState("");
 
+  const [twoFaState, setTwoFaState] = useState<"loading" | "setup" | "verify" | "ready">("loading");
+
   const isAdmin = Boolean(publicKey && ADMIN_ADDRESSES.includes(publicKey));
 
   useEffect(() => {
@@ -99,6 +103,17 @@ export default function AdminDashboard({ publicKey }: AdminPageProps) {
       router.replace("/jobs");
     }
   }, [publicKey, isAdmin, router]);
+
+  useEffect(() => {
+    if (!isAdmin || !publicKey) return;
+    fetchAdmin2FAStatus()
+      .then((status) => {
+        if (!status.totp_enabled) setTwoFaState("setup");
+        else if (!status.verified) setTwoFaState("verify");
+        else setTwoFaState("ready");
+      })
+      .catch(() => setTwoFaState("ready"));
+  }, [isAdmin, publicKey]);
 
   const loadData = useCallback(async () => {
     if (!isAdmin) return;
@@ -122,8 +137,9 @@ export default function AdminDashboard({ publicKey }: AdminPageProps) {
   }, [isAdmin]);
 
   useEffect(() => {
+    if (twoFaState !== "ready") return;
     loadData();
-  }, [loadData]);
+  }, [loadData, twoFaState]);
 
   function showSuccess(msg: string) {
     setActionMessage(msg);
@@ -200,6 +216,28 @@ export default function AdminDashboard({ publicKey }: AdminPageProps) {
       <div className="min-h-screen flex items-center justify-center">
         <p className="text-red-400">Access denied. Admin wallets only.</p>
       </div>
+    );
+  }
+
+  if (twoFaState === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-amber-800">Verifying admin session…</p>
+      </div>
+    );
+  }
+
+  if (twoFaState === "setup" || twoFaState === "verify") {
+    return (
+      <>
+        <Head>
+          <title>Admin 2FA — Stellar MarketPay</title>
+        </Head>
+        <Admin2FAModal
+          mode={twoFaState}
+          onComplete={() => setTwoFaState("ready")}
+        />
+      </>
     );
   }
 

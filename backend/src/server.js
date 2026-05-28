@@ -30,8 +30,9 @@ const messageRoutes   = require("./routes/messageRoutes");
 const webauthnRoutes  = require("./routes/webauthn");
 const disputeRoutes   = require("./routes/disputes");
 const adminRoutes     = require("./routes/admin");
+const admin2faRoutes  = require("./routes/admin2fa");
 const timeEntryRoutes = require("./routes/timeEntries");
-const notificationRoutes = require("./routes/notifications");
+const referralRoutes  = require("./routes/referrals");
 const pool            = require("./db/pool");
 const { migrate } = require("./db/migrate");
 const IndexerService  = require("./services/indexerService");
@@ -200,7 +201,9 @@ app.use("/api/messages",      messageRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/webauthn",      webauthnRoutes);
 app.use("/api/disputes",      disputeRoutes);
+app.use("/api/admin/2fa",     admin2faRoutes);
 app.use("/api/admin",         adminRoutes);
+app.use("/api/time-entries",  timeEntryRoutes);
 app.use("/api/referrals",     referralRoutes);
 
 app.use((err, req, res, next) => {

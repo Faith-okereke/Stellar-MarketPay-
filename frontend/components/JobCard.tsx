@@ -22,6 +22,8 @@ import { useState, useEffect } from "react";
 
 interface JobCardProps {
   job: Job;
+  isFocused?: boolean;
+  onFocus?: () => void;
 }
 
 function CountdownTimer({ deadline }: { deadline: string }) {
@@ -82,7 +84,7 @@ function CountdownTimer({ deadline }: { deadline: string }) {
   );
 }
 
-export default function JobCard({ job }: JobCardProps) {
+export default function JobCard({ job, isFocused = false, onFocus }: JobCardProps) {
   const { xlmPriceUsd } = usePriceContext();
   const { isSaved, toggleBookmark } = useBookmarks();
   const usdEquivalent = formatUSDEquivalent(job.budget, xlmPriceUsd);
@@ -130,8 +132,14 @@ export default function JobCard({ job }: JobCardProps) {
   return (
     <Link href={`/jobs/${job.id}`}>
       {/* ── ISSUE #78: Added relative positioning and hover handlers ── */}
-      <div 
-        className="card-hover group animate-fade-in relative cursor-pointer" 
+      <div
+        className={[
+          "card-hover group animate-fade-in relative cursor-pointer outline-none",
+          isFocused ? "ring-2 ring-market-400/50" : "",
+        ].join(" ")}
+        tabIndex={0}
+        data-job-card-focus={isFocused ? "true" : undefined}
+        onFocus={onFocus}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
