@@ -121,7 +121,7 @@ function rowToJob(row) {
     deadline: row.deadline,
     timezone: row.timezone,
     screeningQuestions: row.screening_questions || [],
-    disputeReason: row.dispute_reason,
+    disputeReason:      row.dispute_reason,
     disputeDescription: row.dispute_description,
     disputedBy: row.disputed_by,
     disputedAt: row.disputed_at,
@@ -405,7 +405,7 @@ async function listJobsByClient(clientAddress) {
   validatePublicKey(clientAddress);
   const { rows } = await pool.query(
     "SELECT * FROM jobs WHERE client_address = $1 ORDER BY created_at DESC",
-    [clientAddress],
+    [clientAddress]
   );
   return rows.map(rowToJob);
 }
@@ -991,14 +991,4 @@ module.exports = {
   resolveDispute,
   getCategoryAnalytics,
   getAnalyticsOverview,
-  getSuggestions,
-  extendJobExpiry,
-  incrementViewCount,
-  getJobAnalytics,
-  expireOldJobs,
-  getExpiringJobs,
-  bulkCancelJobs,
-  bulkExtendJobs,
-  bulkBoostJobs,
-  getRecommendedJobs,
 };

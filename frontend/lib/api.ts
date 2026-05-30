@@ -14,9 +14,7 @@ import type {
   PortfolioFile,
   TokenInfo,
   TokenBalance,
-  ReferralStats,
-  TimeEntry,
-  TimeInvoice,
+  ClientReputation,
 } from "@/utils/types";
 
 const api = axios.create({
@@ -483,6 +481,13 @@ export async function fetchClientSpendingAnalytics(publicKey: string) {
     success: boolean;
     data: ClientSpendingAnalytics;
   }>(`/api/profiles/${encodeURIComponent(publicKey)}/spending`);
+  return data.data;
+}
+
+export async function fetchClientReputation(publicKey: string): Promise<ClientReputation> {
+  const { data } = await api.get<{ success: boolean; data: ClientReputation }>(
+    `/api/profiles/${encodeURIComponent(publicKey)}/client-reputation`
+  );
   return data.data;
 }
 
