@@ -7,8 +7,11 @@ import { useRouter } from "next/router";
 import { shortenAddress } from "@/utils/format";
 import clsx from "clsx";
 import { useTranslation } from "@/lib/i18n";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import FaucetButton from "@/components/FaucetButton";
 import i18next from "@/lib/i18n";
+import { usePriceContext } from "@/contexts/PriceContext";
+import NotificationBell from "@/components/NotificationBell";
 
 interface NavbarProps {
   publicKey: string | null;
@@ -22,6 +25,8 @@ const links = [
   { href: "/dashboard",   labelKey: "nav.dashboard" },
   { href: "/post-job",    labelKey: "nav.postJob" },
   { href: "/insights",    labelKey: "nav.insights" },
+  { href: "/developer",   labelKey: "nav.developer" },
+  { href: "/dao",           labelKey: "nav.dao" },
 ];
 
 const STELLAR_NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet";
@@ -29,11 +34,43 @@ const STELLAR_NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet";
 export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarProps) {
   const router = useRouter();
   const { t, i18n } = useTranslation("common");
+  const switchLanguage = (lng: string) => i18n?.changeLanguage(lng);
   const [hasNotification, setHasNotification] = useState(false);
   const [hasJobAlertBadge, setHasJobAlertBadge] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { currencyMode, setCurrencyMode, priceLoading } = usePriceContext();
+  const [darkMode, setDarkMode] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+
+  // Dark mode initialization — respect OS preference on first visit
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = localStorage.getItem("theme");
+      if (stored === "dark" || stored === "light") {
+        setDarkMode(stored === "dark");
+        document.documentElement.classList.toggle("dark", stored === "dark");
+      } else {
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        setDarkMode(prefersDark);
+        document.documentElement.classList.toggle("dark", prefersDark);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const toggleDarkMode = () => {
+    const next = !darkMode;
+    setDarkMode(next);
+    document.documentElement.classList.toggle("dark", next);
+    try {
+      localStorage.setItem("theme", next ? "dark" : "light");
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     const handleActivity = () => {
@@ -138,6 +175,56 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
             value={i18n.language}
             onChange={(e) => switchLanguage(e.target.value)}
             className="bg-market-900/40 border border-amber-900/30 rounded px-2 py-1 text-xs text-amber-100 cursor-pointer min-h-[44px]"
+        {/* Currency Toggle */}
+        <div className="hidden md:flex items-center">
+          <button
+            onClick={() => setCurrencyMode(currencyMode === "XLM" ? "USD" : "XLM")}
+            disabled={priceLoading}
+            className={clsx(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all duration-150",
+              currencyMode === "USD"
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                : "bg-market-500/10 text-market-400 border-market-500/20",
+              priceLoading && "opacity-50 cursor-not-allowed"
+            )}
+            title={currencyMode === "XLM" ? "Switch to USD" : "Switch to XLM"}
+            aria-label={`Currency: ${currencyMode}. Click to switch`}
+          >
+            {priceLoading ? (
+              <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <span className="text-[10px] font-bold">{currencyMode === "XLM" ? "◎" : "$"}</span>
+            )}
+            {currencyMode}
+          </button>
+        </div>
+
+        {/* Dark Mode Toggle */}
+        <div className="hidden md:flex items-center">
+          <button
+            onClick={toggleDarkMode}
+            className="p-1.5 rounded-lg text-amber-700 hover:text-amber-300 hover:bg-market-500/8 transition-colors"
+            title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {darkMode ? (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {/* Language Switcher */}
+        <div className="hidden md:flex items-center">
+          <select
+            value={i18n.language}
+            onChange={(e) => i18n.changeLanguage(e.target.value)}
+            className="bg-market-900/40 border border-amber-900/30 rounded px-2 py-1 text-xs text-amber-100 cursor-pointer"
             aria-label={t("language.switch") as string}
           >
             <option value="en">{t("language.english")}</option>
@@ -149,6 +236,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
         <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           {publicKey ? (
             <>
+              <NotificationBell publicKey={publicKey} />
               <button
                 onClick={() => router.push("/dashboard/transactions")}
                 className="flex items-center gap-1 sm:gap-1.5 address-tag cursor-pointer hover:opacity-80 transition-opacity text-xs sm:text-sm px-2 py-2 sm:px-3 sm:py-2 min-h-[44px]"
@@ -244,6 +332,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
         </div>
       )}
     </nav>
+    </>
   );
 }
 
